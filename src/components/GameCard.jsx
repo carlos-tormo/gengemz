@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { MoreVertical, Star, Heart, Edit2, Trash2, ImageIcon } from 'lucide-react';
-import { PLACEHOLDER_COVERS } from '../config/constants';
+import { PLACEHOLDER_COVERS } from '../config/Constants';
 import { useClickOutside } from '../hooks/useClickOutside';
 
 const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite }) => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Gamepad2 } from 'lucide-react';
-import { COLUMN_ICONS } from '../config/constants';
+import { COLUMN_ICONS } from '../config/Constants';
 
 const IconRenderer = ({ iconName, size = 20, className }) => {
   const IconComponent = COLUMN_ICONS[iconName] || Gamepad2;
