@@ -2,15 +2,21 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+if (!import.meta.env.VITE_FIREBASE_API_KEY) {
+  throw new Error(
+    'Firebase config is missing. Please create a .env.local file in the /frontend directory and add your Firebase project credentials. You can use .env.example as a template.'
+  );
+}
+
 // --- Firebase Setup ---
 const firebaseConfig = {
-  apiKey: "AIzaSyAjcMauPVcOcHbfUq0oHSBbLaBmckP25U",
-  authDomain: "gengemztest-958e.firebaseapp.com",
-  projectId: "gengemztest-958e",
-  storageBucket: "gengemztest-958e.firebasestorage.app",
-  messagingSenderId: "189314077160",
-  appId: "1:189314077160:web:a4ca2da49789d519a6145d",
-  measurementId: "G-WK7HTBNZ4J"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);

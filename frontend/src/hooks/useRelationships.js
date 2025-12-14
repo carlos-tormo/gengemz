@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { 
   doc, onSnapshot, collection, query, where, getDocs, setDoc, addDoc, deleteDoc, updateDoc, serverTimestamp
 } from "firebase/firestore";
-import { db, APP_ID } from '../config/firebase';
+import { db } from '../config/firebase';
+import { APP_ID } from '../config/constants';
 
 const useRelationships = (user) => {
   const [following, setFollowing] = useState({});

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../config/firebase'; // Assuming APP_ID is also used here
+import { db } from '../config/firebase';
+import { APP_ID } from '../config/constants';
 
 const useDebouncedSave = (user) => {
   const [status, setStatus] = useState('idle'); 
