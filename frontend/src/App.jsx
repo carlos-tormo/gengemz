@@ -1,229 +1,48 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  Plus, MoreVertical, Gamepad2, Trophy, Clock, X, GripVertical, Trash2, 
+  Plus, MoreVertical, Gamepad2, X, GripVertical, Trash2, 
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
-  ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid,
-  Pencil, Star, Heart, Zap, Skull, Flame, Bookmark, Sword, Target, Ghost, Lock, Unlock, Calendar,
+  ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid, List,
+  Pencil, Lock, Unlock, Calendar,
   Settings, Users, UserPlus, Shield, Wrench, Database
 } from 'lucide-react';
-import { initializeApp } from "firebase/app";
+
+// Firebase imports
+import { auth, db } from './config/firebase';
 import { 
-  getAuth, signOut, onAuthStateChanged, signInAnonymously, 
-  signInWithCustomToken, updateProfile, signInWithPopup, GoogleAuthProvider,
+  signOut, onAuthStateChanged, signInAnonymously, 
+  updateProfile, signInWithPopup, GoogleAuthProvider,
   setPersistence, browserLocalPersistence
 } from "firebase/auth";
 import { 
-  getFirestore, doc, onSnapshot, setDoc, getDoc, collection, query, where, getDocs
+  doc, onSnapshot, setDoc, addDoc, getDoc, deleteDoc, collection, query, where, getDocs, updateDoc, serverTimestamp
 } from "firebase/firestore";
 
-// --- Firebase Setup ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAjcMauPVcOcHbfUqQ0oHSBbLaBmckP25U",
-  authDomain: "gengemztest-9582e.firebaseapp.com",
-  projectId: "gengemztest-9582e",
-  storageBucket: "gengemztest-9582e.firebasestorage.app",
-  messagingSenderId: "189314077160",
-  appId: "1:189314077160:web:a4ca2da49789d519a6145d",
-  measurementId: "G-WK7HTBNZ4J"
-};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Constants and config
+import { 
+  APP_ID, BACKEND_URL, PLACEHOLDER_COVERS, INITIAL_DATA, COLUMN_ICONS
+} from './config/constants';
 
-const APP_ID = 'gengemz-prod'; 
-const BACKEND_URL = "https://us-central1-gengemztest-9582e.cloudfunctions.net/searchGames";
+// Components
+import Modal from './components/Modal';
+import IconRenderer from './components/IconRenderer';
+import GameCard from './components/GameCard';
+import GridGameCard from './components/GridGameCard';
+import Column from './components/Column';
+import UserMenu from './components/UserMenu';
+import LandingPage from './components/LandingPage';
 
-const PLACEHOLDER_COVERS = [
-  "linear-gradient(to bottom right, #ef4444, #b91c1c)",
-  "linear-gradient(to bottom right, #3b82f6, #1d4ed8)", 
-  "linear-gradient(to bottom right, #10b981, #047857)",
-  "linear-gradient(to bottom right, #8b5cf6, #6d28d9)",
-  "linear-gradient(to bottom right, #f59e0b, #b45309)",
-];
+// Hooks
+import useClickOutside from './hooks/useClickOutside';
+import useDebouncedSave from './hooks/useDebouncedSave';
+import useRelationships from './hooks/useRelationships';
 
-const INITIAL_DATA = {
-  games: {},
-  columns: {
-    'backlog': { id: 'backlog', title: 'To Play', icon: 'clock', itemIds: [] },
-    'playing': { id: 'playing', title: 'Currently Playing', icon: 'gamepad', itemIds: [] },
-    'completed': { id: 'completed', title: 'Victory Road', icon: 'trophy', itemIds: [] },
-  },
-  columnOrder: ['backlog', 'playing', 'completed'],
-};
-
-const COLUMN_ICONS = {
-  clock: Clock, gamepad: Gamepad2, trophy: Trophy, star: Star, heart: Heart, 
-  zap: Zap, skull: Skull, flame: Flame, bookmark: Bookmark, sword: Sword, 
-  target: Target, ghost: Ghost
-};
-
-const IconRenderer = ({ iconName, size = 20, className }) => {
-  const IconComponent = COLUMN_ICONS[iconName] || Gamepad2;
-  return <IconComponent size={size} className={className} />;
-};
-
-// --- CUSTOM HOOKS ---
-
-// 1. useClickOutside: Handles closing menus when clicking elsewhere
-const useClickOutside = (ref, handler) => {
-  useEffect(() => {
-    const listener = (event) => {
-      if (!ref.current || ref.current.contains(event.target)) return;
-      handler(event);
-    };
-    document.addEventListener('mousedown', listener);
-    document.addEventListener('touchstart', listener);
-    return () => {
-      document.removeEventListener('mousedown', listener);
-      document.removeEventListener('touchstart', listener);
-    };
-  }, [ref, handler]);
-};
-
-// 2. useDebouncedSave: Handles auto-saving to Firestore without spamming writes
-const useDebouncedSave = (user) => {
-  const [status, setStatus] = useState('idle'); 
-  const timeoutRef = useRef(null);
-
-  const save = useCallback((newData) => {
-    if (!user) {
-      setStatus('idle'); // No user yet, don't error out
-      return;
-    }
-    
-    setStatus('saving');
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-    timeoutRef.current = setTimeout(async () => {
-      try {
-        const userDocRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'data', 'board');
-        await setDoc(userDocRef, newData, { merge: true });
-        setStatus('saved');
-        setTimeout(() => setStatus('idle'), 2000);
-      } catch (error) {
-        console.error("Save failed:", error);
-        setStatus('error');
-      }
-    }, 1000); 
-  }, [user]);
-
-  return { status, save };
-};
-
-// --- Components ---
-
-const Modal = ({ isOpen, onClose, title, children, preventClose }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-        <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-900/50 shrink-0">
-          <h3 className="text-lg font-bold text-white">{title}</h3>
-          {!preventClose && <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>}
-        </div>
-        <div className="p-4 overflow-y-auto custom-scrollbar">{children}</div>
-      </div>
-    </div>
-  );
-};
-
-const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite }) => {
-  const [showMenu, setShowMenu] = useState(false);
-  const menuRef = useRef(null);
-  useClickOutside(menuRef, () => setShowMenu(false));
-
-  const handleScoreClick = (e) => { e.stopPropagation(); onEdit(game, true); };
-  const handleCardClick = (e) => { if (e.target.closest('button') || e.target.closest('.interactive-area')) return; onEdit(game, false); };
-
-  return (
-    <div draggable onDragStart={(e) => onDragStart(e, game.id, columnId)} onClick={handleCardClick} className="group relative bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-purple-500/50 rounded-xl p-3 mb-3 shadow-lg hover:shadow-purple-900/20 transition-all duration-200 cursor-grab active:cursor-grabbing select-none touch-manipulation">
-      <div className="flex gap-4">
-        <div className="w-20 h-28 rounded-lg shrink-0 shadow-inner flex items-center justify-center bg-cover bg-center relative overflow-hidden" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[game.coverIndex % PLACEHOLDER_COVERS.length] }}>{!game.cover && <span className="text-white/20 font-bold text-xl relative z-10">{game.title.charAt(0)}</span>}{!game.cover && <div className="absolute inset-0 bg-black/10" />}</div>
-        <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-          <div>
-            <h4 className="text-slate-100 font-bold text-base truncate leading-tight mb-1 group-hover:text-purple-300 transition-colors">{game.title}</h4>
-            <div className="flex flex-wrap gap-1.5 opacity-80">{game.platform && <span className="px-1.5 py-0.5 bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider font-bold rounded max-w-full truncate">{game.platform}</span>}<span className="px-1.5 py-0.5 bg-slate-700 text-slate-300 text-[10px] rounded">{game.genre}</span></div>
-          </div>
-          <div className="flex items-center justify-end gap-3 mt-2 interactive-area">
-            <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(game.id); }} className={`p-1.5 rounded-full transition-colors ${game.isFavorite ? 'text-red-500 bg-red-500/10' : 'text-slate-500 hover:text-red-400 hover:bg-slate-700'}`} title={game.isFavorite ? "Remove from Favorites" : "Add to Favorites"}><Heart size={18} className={game.isFavorite ? "fill-current" : ""} /></button>
-            <div onClick={handleScoreClick} className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700 hover:border-slate-500 cursor-pointer transition-colors"><Star size={12} className={game.rating > 0 ? "text-yellow-400 fill-current" : "text-slate-600"} /><span className={`text-xs font-bold ${game.rating > 0 ? 'text-slate-200' : 'text-slate-500'}`}>{game.rating > 0 ? game.rating : '--'}</span></div>
-            <div className="h-4 w-px bg-slate-700 mx-1"></div>
-            <div className="relative" ref={menuRef}>
-              <button onClick={() => setShowMenu(!showMenu)} className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded-full transition-colors"><MoreVertical size={18} /></button>
-              {showMenu && (<div className="absolute right-0 top-8 bg-slate-900 border border-slate-700 shadow-xl rounded-lg z-20 w-40 overflow-hidden py-1"><button onClick={() => { onEdit(game, false); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 flex items-center gap-2"><ImageIcon size={14} /> View Card</button><div className="h-px bg-slate-800 my-1"></div><div className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase border-b border-slate-800">Move to...</div><button onClick={() => onMoveRequest(game.id, 'backlog')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-purple-900/30 hover:text-purple-300">To Play</button><button onClick={() => onMoveRequest(game.id, 'playing')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-blue-900/30 hover:text-blue-300">Playing</button><button onClick={() => onMoveRequest(game.id, 'completed')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-green-900/30 hover:text-green-300">Completed</button><div className="h-px bg-slate-800 my-1"></div><button onClick={() => onDelete(game.id)} className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2"><Trash2 size={14} /> Delete</button></div>)}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const GridGameCard = ({ game, onMoveRequest, onDelete, onEdit, onToggleFavorite }) => {
-  const [showMenu, setShowMenu] = useState(false);
-  const menuRef = useRef(null);
-  useClickOutside(menuRef, () => setShowMenu(false));
-
-  return (
-    <div onClick={() => onEdit(game, false)} className="group relative aspect-[3/4] rounded-xl overflow-hidden shadow-lg hover:shadow-purple-900/40 transition-all duration-300 hover:scale-105 bg-slate-800 border border-slate-700 cursor-pointer">
-      <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[game.coverIndex % PLACEHOLDER_COVERS.length] }}>{!game.cover && <div className="flex items-center justify-center h-full text-white/20 font-bold text-4xl">{game.title.charAt(0)}</div>}</div>
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-90 transition-opacity" />
-      <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(game.id); }} className={`absolute top-2 left-2 p-1.5 rounded-full backdrop-blur-md transition-colors z-10 ${game.isFavorite ? 'bg-red-500 text-white shadow-lg' : 'bg-black/30 text-white/70 hover:bg-black/60 hover:text-red-400'}`}><Heart size={16} className={game.isFavorite ? "fill-current" : ""} /></button>
-      {game.rating > 0 && (<div onClick={(e) => { e.stopPropagation(); onEdit(game, true); }} className={`absolute bottom-2 right-2 px-2 py-1 rounded-md text-xs font-bold shadow-lg backdrop-blur-sm z-10 flex items-center gap-1 hover:scale-110 transition-transform ${game.rating >= 9 ? 'bg-yellow-500 text-black' : game.rating >= 7 ? 'bg-green-600 text-white' : 'bg-slate-800 text-white border border-slate-600'}`}><Star size={10} className="fill-current" />{game.rating}</div>)}
-      <div className="absolute inset-x-0 bottom-0 p-3 flex flex-col justify-end pointer-events-none"><h4 className="text-white font-bold text-sm leading-tight line-clamp-2 drop-shadow-md mb-4 group-hover:mb-1 transition-all">{game.title}</h4><div className="flex items-center gap-2 h-0 opacity-0 group-hover:h-auto group-hover:opacity-100 transition-all duration-300">{game.platform && <span className="text-[10px] text-slate-300 uppercase tracking-wider bg-black/50 px-1.5 py-0.5 rounded">{game.platform}</span>}</div></div>
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10" ref={menuRef}><button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="p-1.5 bg-black/60 text-white hover:bg-purple-600 rounded-full backdrop-blur-md"><MoreVertical size={16} /></button>{showMenu && (<div className="absolute right-0 top-8 bg-slate-900 border border-slate-700 shadow-xl rounded-lg z-20 w-32 overflow-hidden py-1"><button onClick={() => { onEdit(game, false); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 flex items-center gap-2"><ImageIcon size={12} /> View Card</button><div className="h-px bg-slate-800 my-1"></div><button onClick={() => onDelete(game.id)} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-900/20">Delete</button></div>)}</div>
-    </div>
-  );
-};
-
-const Column = ({ column, games, onDragOver, onDrop, onDragStart, onMoveRequest, onDelete, isDraggingOver, filterPlatform, onHeaderClick, onEditColumn, onEditGame, onToggleFavorite }) => {
-  const filteredItemIds = column.itemIds.filter(gameId => { if (!filterPlatform || filterPlatform === 'All') return true; const game = games[gameId]; return game?.platform?.toLowerCase().includes(filterPlatform.toLowerCase()); });
-  return (
-    <div onDragOver={(e) => onDragOver(e, column.id)} onDrop={(e) => onDrop(e, column.id)} className={`flex-shrink-0 w-80 max-w-[90vw] flex flex-col rounded-xl transition-colors duration-200 ${isDraggingOver ? 'bg-slate-800/50 ring-2 ring-purple-500/30' : 'bg-slate-900/40'}`}>
-      <div onClick={() => onHeaderClick(column.id)} className="p-4 flex items-center justify-between border-b border-slate-800/50 cursor-pointer group hover:bg-slate-800/50 rounded-t-xl transition-colors relative"><div className="flex items-center gap-2 text-slate-200 font-bold tracking-wide"><span className={`p-2 rounded-lg transition-transform group-hover:scale-110 ${column.id === 'backlog' ? 'bg-slate-800 text-slate-400' : column.id === 'playing' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}><IconRenderer iconName={column.icon} /></span><span className="group-hover:text-white transition-colors">{column.title}</span><span className="ml-2 text-xs font-normal text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">{filteredItemIds.length}</span></div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all"><button onClick={(e) => { e.stopPropagation(); onEditColumn(column); }} className="p-1.5 hover:bg-slate-700 rounded-md text-slate-500 hover:text-white" title="Edit List"><Pencil size={14} /></button><LayoutGrid size={16} className="text-slate-600 ml-1" /></div></div>
-      <div className="p-3 flex-1 overflow-y-auto min-h-[150px] max-h-[calc(100vh-220px)] custom-scrollbar">
-        {filteredItemIds.map((gameId, index) => { const game = games[gameId]; if (!game) return null; return (<GameCard key={game.id} game={game} index={index} columnId={column.id} onDragStart={onDragStart} onMoveRequest={onMoveRequest} onDelete={onDelete} onEdit={onEditGame} onToggleFavorite={onToggleFavorite} />); })}
-        {column.itemIds.length === 0 && <div className="h-32 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl"><GripVertical size={24} className="mb-2 opacity-50" /><span className="text-sm">Drop games here</span></div>}
-        {column.itemIds.length > 0 && filteredItemIds.length === 0 && <div className="h-32 flex flex-col items-center justify-center text-slate-600"><span className="text-sm">No {filterPlatform} games</span></div>}
-      </div>
-    </div>
-  );
-};
-
-const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef(null);
-  useClickOutside(menuRef, () => setIsOpen(false));
-  if (!user) return null;
-  const displayName = user.isAnonymous ? 'Guest' : (user.displayName || 'User');
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-2 p-1.5 pr-3 rounded-full bg-slate-800 border border-slate-700 hover:border-slate-600 transition-all">{user.photoURL ? <img src={user.photoURL} alt="Avatar" className="w-8 h-8 rounded-full object-cover" /> : <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white font-bold uppercase">{displayName[0]}</div>}<span className="text-sm font-medium text-slate-300 max-w-[100px] truncate hidden sm:block">{displayName}</span></button>
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
-            <div className="p-3 border-b border-slate-800"><div className="text-xs text-slate-500 mb-1">Currently playing as</div><div className="text-sm text-white font-medium truncate">{displayName}</div></div>
-            <div className="p-2 flex flex-col gap-1">
-              {!user.isAnonymous && <button onClick={() => { onOpenSettings(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"><Settings size={16} /> Settings</button>}
-              {user.isAnonymous ? <button onClick={() => { onLogin(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"><LogIn size={16} /> Sign In with Google</button> : <button onClick={() => { onLogout(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"><LogOut size={16} /> Sign Out</button>}
-              {!user.isAnonymous && <button onClick={() => { onOpenProfile(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"><Edit2 size={16} /> Edit Name</button>}
-            </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const LandingPage = ({ onStart, onLogin }) => {
-  return (
-    <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)] text-center px-4 animate-in fade-in duration-500">
-      <div className="bg-gradient-to-br from-purple-600 to-blue-600 p-6 rounded-3xl shadow-2xl shadow-purple-500/20 mb-8 transform hover:scale-105 transition-transform duration-300"><Gamepad2 size={64} className="text-white" /></div>
-      <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">Track Your Gaming Journey</h2>
-      <p className="text-slate-400 text-lg mb-10 max-w-md">Organize your backlog, manage current playthroughs, and celebrate your victories.</p>
-      <div className="flex flex-col gap-4 w-full max-w-sm"><button onClick={onStart} className="group relative w-full py-4 bg-white text-slate-900 font-bold rounded-xl shadow-lg hover:shadow-white/10 hover:bg-slate-100 transition-all active:scale-95 flex items-center justify-center gap-2"><span>Start as Guest</span><ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></button><div className="flex items-center gap-4 w-full"><div className="h-px bg-slate-800 flex-1"></div><span className="text-slate-600 text-sm">OR</span><div className="h-px bg-slate-800 flex-1"></div></div><button onClick={onLogin} className="w-full py-4 bg-slate-800 text-white font-semibold rounded-xl border border-slate-700 hover:border-slate-600 hover:bg-slate-750 transition-all flex items-center justify-center gap-2"><LogIn size={20} /><span>Continue with Google</span></button></div>
-    </div>
-  );
-};
+// Utilities
+import { 
+  getUniquePlatforms, getHiddenGamesCount, getFavoriteGames, 
+  findExistingGameIdByTitle, getGameColumnId, isGameOnBoard 
+} from './utils/gameUtils';
+import { saveData } from './utils/dataManagement';
 
 // --- Main App Component ---
 
@@ -235,6 +54,7 @@ export default function App() {
   
   // Optimized Save Hook
   const { status: saveStatus, save: triggerSave } = useDebouncedSave(user);
+  const { relationships, follow, unfollow, block, unblock } = useRelationships(user);
   
   // View State
   const [activePlatformFilter, setActivePlatformFilter] = useState('All');
@@ -245,6 +65,8 @@ export default function App() {
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [columnForm, setColumnForm] = useState({ id: '', title: '', icon: 'gamepad' });
   const [isEditingColumn, setIsEditingColumn] = useState(false);
+  const [deleteMode, setDeleteMode] = useState('move'); // 'move' | 'delete'
+  const [deleteTarget, setDeleteTarget] = useState('');
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -261,6 +83,30 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
 
+  // User Search / Social
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [userSearchError, setUserSearchError] = useState(null);
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
+  const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
+  const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
+  const [isListView, setIsListView] = useState(false);
+  const [playlists, setPlaylists] = useState([]);
+  const [isPlaylistsModalOpen, setIsPlaylistsModalOpen] = useState(false);
+  const [isPlaylistDetailOpen, setIsPlaylistDetailOpen] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [playlistForm, setPlaylistForm] = useState({ title: '', description: '', items: {} });
+  const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
+  const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
+  const [playlistSearchResults, setPlaylistSearchResults] = useState([]);
+  const [isSearchingPlaylistGames, setIsSearchingPlaylistGames] = useState(false);
+  const [playlistSearchError, setPlaylistSearchError] = useState(null);
+  const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
+  const [duplicateTarget, setDuplicateTarget] = useState('');
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
     privacy: '', 
@@ -268,62 +114,45 @@ export default function App() {
     displayName: '' // Consolidated Single Source of Truth
   });
 
-  // User Search State
-  const [userSearchQuery, setUserSearchQuery] = useState('');
-  const [userSearchResults, setUserSearchResults] = useState([]);
-  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
-
   const dataRef = useRef(INITIAL_DATA);
   const userRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
 
+  // Load playlists (public)
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'artifacts', APP_ID, 'playlists'), (snap) => {
+      const list = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setPlaylists(list);
+    }, (err) => console.error("Playlists load failed", err));
+    return () => unsub();
+  }, []);
+
+  // Default delete options when opening the column modal
+  useEffect(() => {
+    if (!isColumnModalOpen) return;
+    if (isEditingColumn) {
+      const otherCols = data.columnOrder.filter(id => id !== columnForm.id);
+      setDeleteMode(otherCols.length ? 'move' : 'delete');
+      setDeleteTarget(otherCols[0] || '');
+    } else {
+      setDeleteMode('move');
+      setDeleteTarget('');
+    }
+  }, [isColumnModalOpen, isEditingColumn, data.columnOrder, columnForm.id]);
+
   const [isDragging, setIsDragging] = useState(false);
   const [draggedItem, setDraggedItem] = useState(null);
   const [activeDropZone, setActiveDropZone] = useState(null);
 
-  // --- REFACTORED HELPERS (Robust Platform Logic) ---
-  const getUniquePlatforms = () => {
-    const platforms = new Set(['All']);
-    if (data.games) {
-      Object.values(data.games).forEach(game => {
-        if (!game.platform) return;
-        const p = game.platform;
-        if (p.includes('PlayStation')) platforms.add('PlayStation');
-        else if (p.includes('Xbox')) platforms.add('Xbox');
-        else if (p.includes('PC')) platforms.add('PC');
-        else if (p.includes('Nintendo') || p.includes('Switch')) platforms.add('Nintendo');
-        else platforms.add(p);
-      });
-    }
-    return Array.from(platforms).sort();
-  };
-
-  const getHiddenGamesCount = () => {
-    if (activePlatformFilter === 'All') return 0;
-    const allGames = Object.values(data.games || {});
-    const visibleCount = allGames.filter(game => 
-      game.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase())
-    ).length;
-    return allGames.length - visibleCount;
-  };
-
-  const getFavoriteGames = () => {
-    if (!data.games) return [];
-    return Object.values(data.games).filter(game => game.isFavorite);
-  };
-
-  const hiddenGamesCount = getHiddenGamesCount();
-  const favoriteGames = getFavoriteGames();
+  const hiddenGamesCount = getHiddenGamesCount(data, activePlatformFilter);
+  const favoriteGames = getFavoriteGames(data);
 
   // --- REFACTORED SAVEDATA (Functional Updates) ---
-  const saveData = (updater) => {
-    setData(prev => {
-      const newData = typeof updater === 'function' ? updater(prev) : updater;
-      triggerSave(newData);
-      return newData;
-    });
-  };
+  const save = saveData(setData, triggerSave);
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).then(() => {
@@ -459,8 +288,9 @@ export default function App() {
       return;
     }
     setIsSearchingUsers(true);
+    setUserSearchError(null);
     try {
-      const q = query(collection(db, 'artifacts', APP_ID, 'public_profiles'), where("privacy", "==", "public"));
+      const q = query(collection(db, 'artifacts', APP_ID, 'public_profiles'), where("privacy", "in", ["public", "invite_only"]));
       const querySnapshot = await getDocs(q);
       const results = [];
       querySnapshot.forEach((doc) => {
@@ -472,18 +302,184 @@ export default function App() {
       setUserSearchResults(results);
     } catch (e) {
       console.error("Search failed", e);
+      setUserSearchError("Search failed. Try again.");
     } finally {
       setIsSearchingUsers(false);
+    }
+  };
+
+  const openProfile = async (profile) => {
+    setSelectedProfile(profile);
+    setSelectedProfileBoard(null);
+    setIsProfileViewOpen(true);
+    try {
+      const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'users', profile.uid, 'data', 'board'));
+      if (snap.exists()) setSelectedProfileBoard(snap.data());
+    } catch (err) {
+      console.error("Failed to load profile board", err);
+    }
+  };
+
+  const handleFollowAction = async (profile) => {
+    if (!user) { alert("Please sign in to follow players."); return; }
+    const isFollowing = !!relationships.following[profile.uid];
+    const res = isFollowing ? await unfollow(profile.uid) : await follow(profile);
+    if (!res?.ok && res?.error) {
+      alert(res.error);
+    }
+  };
+
+  const handleBlockAction = async (profile) => {
+    if (!user) return;
+    const res = await block(profile);
+    if (!res?.ok && res?.error) {
+      alert(res.error);
+    }
+  };
+
+  const handlePlaylistSearch = async (e) => {
+    e.preventDefault();
+    if (!playlistSearchQuery.trim()) {
+      setPlaylistSearchResults([]);
+      return;
+    }
+    setIsSearchingPlaylistGames(true);
+    setPlaylistSearchError(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(playlistSearchQuery)}`);
+      if (!res.ok) throw new Error("Search failed");
+      const d = await res.json();
+      setPlaylistSearchResults(d.results || []);
+    } catch (err) {
+      console.error("Playlist search failed", err);
+      setPlaylistSearchError("Search failed. Try again.");
+    } finally {
+      setIsSearchingPlaylistGames(false);
+    }
+  };
+
+  // --- Playlists ---
+  const addPlaylistItemToList = (item, colId) => {
+    const existingId = findExistingGameIdByTitle(data, item.title);
+    if (existingId) {
+      promptDuplicateMove(existingId);
+      return;
+    }
+    const newId = `g${Date.now()}`;
+    const target = colId && data.columns[colId] ? colId : data.columnOrder[0];
+    save(prev => ({
+      ...prev,
+      games: { 
+        ...prev.games, 
+        [newId]: { 
+          id: newId,
+          title: item.title,
+          platform: item.platform,
+          genre: item.genre,
+          year: item.year,
+          cover: item.cover,
+          coverIndex: item.coverIndex || 0,
+          rating: item.rating || 0,
+          isFavorite: item.isFavorite || false
+        } 
+      },
+      columns: {
+        ...prev.columns,
+        [target]: {
+          ...prev.columns[target],
+          itemIds: [newId, ...prev.columns[target].itemIds]
+        }
+      }
+    }));
+  };
+
+  const addGameToPlaylist = async (playlistId, game) => {
+    if (!playlistId || !game) return;
+    try {
+      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', playlistId);
+      const snap = await getDoc(plRef);
+      if (!snap.exists()) throw new Error("Playlist not found");
+      const current = snap.data().items || [];
+      const exists = current.some(item => item.originId === game.id || item.title === game.title);
+      if (exists) {
+        alert("Game already in playlist");
+        return;
+      }
+      const newItem = {
+        title: game.title,
+        platform: game.platform,
+        genre: game.genre,
+        year: game.year,
+        cover: game.cover,
+        coverIndex: game.coverIndex || 0,
+        rating: game.rating || 0,
+        isFavorite: item.isFavorite || false,
+        originId: game.id,
+        sourceType: 'board'
+      };
+      await updateDoc(plRef, { items: [...current, newItem], updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error("Add to playlist failed", err);
+      alert(err.message || "Failed to add to playlist");
+    }
+  };
+
+  const handleCreatePlaylist = async (e) => {
+    e.preventDefault();
+    if (!playlistForm.title.trim()) return;
+    const selectedIds = Object.keys(playlistForm.items).filter(id => playlistForm.items[id]);
+    if (selectedIds.length === 0) {
+      alert("Select at least one game to add.");
+      return;
+    }
+    setIsSavingPlaylist(true);
+    try {
+      const items = selectedIds.map(id => {
+        const source = data.games[id] || playlistSearchResults.find(r => `ext-${r.id}` === id);
+        if (!source) return null;
+        return {
+          title: source.title || source.name,
+          platform: source.platform || (source.platforms ? source.platforms.map(p => p.platform.name).slice(0,2).join(', ') : ''),
+          genre: source.genre || source.genres?.[0]?.name || '',
+          year: source.year || (source.released?.split('-')[0] || ''),
+          cover: source.cover || source.background_image,
+          coverIndex: source.coverIndex || 0,
+          rating: source.rating || 0,
+          isFavorite: source.isFavorite || false,
+          originId: source.id,
+          sourceType: data.games[id] ? 'board' : 'search'
+        };
+      }).filter(Boolean);
+      await addDoc(collection(db, 'artifacts', APP_ID, 'playlists'), {
+        title: playlistForm.title,
+        description: playlistForm.description || '',
+        ownerUid: user?.uid || 'anon',
+        ownerName: user?.displayName || 'Guest',
+        items,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setPlaylistForm({ title: '', description: '', items: {} });
+      setIsPlaylistsModalOpen(false);
+    } catch (err) {
+      alert(err.message || "Failed to save playlist");
+    } finally {
+      setIsSavingPlaylist(false);
     }
   };
 
   const searchGames = async (e) => { e.preventDefault(); if (!searchQuery.trim()) return; setIsSearching(true); setSearchError(null); setSearchResults([]); try { const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(searchQuery)}`); if (!res.ok) throw new Error(); const d = await res.json(); setSearchResults(d.results || []); } catch { setSearchError("Failed."); } finally { setIsSearching(false); } };
   
   const handleAddGameFromSearch = (g) => { 
+    const existingId = findExistingGameIdByTitle(data, g.name);
+    if (existingId) {
+      promptDuplicateMove(existingId);
+      return;
+    }
     const newId = `g${Date.now()}`; 
     const target = zoomedColumnId || 'backlog'; 
     
-    saveData(prev => {
+    save(prev => {
       const newGame = { 
         id: newId, 
         title: g.name, 
@@ -516,7 +512,7 @@ export default function App() {
   const handleSaveGameCard = (e) => { 
     e.preventDefault(); 
     if (!selectedGame) return; 
-    saveData(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: selectedGame } })); 
+    save(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: selectedGame } })); 
     setIsGameCardEditing(false); 
   };
   
@@ -524,7 +520,7 @@ export default function App() {
     if (!selectedGame) return; 
     const s = !selectedGame.isFavorite; 
     setSelectedGame(p => ({ ...p, isFavorite: s })); 
-    saveData(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: { ...prev.games[selectedGame.id], isFavorite: s } } })); 
+    save(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: { ...prev.games[selectedGame.id], isFavorite: s } } })); 
   };
 
   const onDragStart = (e, id, c) => { setIsDragging(true); setDraggedItem({ gameId: id, sourceColId: c }); }; const onDragOver = (e, c) => { e.preventDefault(); if (activeDropZone !== c) setActiveDropZone(c); }; 
@@ -534,7 +530,7 @@ export default function App() {
     if (!draggedItem || draggedItem.sourceColId === d) return; 
     const { gameId, sourceColId } = draggedItem; 
     
-    saveData(prev => {
+    save(prev => {
       const s = prev.columns[sourceColId];
       const f = prev.columns[d];
       return { 
@@ -549,7 +545,7 @@ export default function App() {
   };
 
   const handleManualMove = (id, d) => { 
-    saveData(prev => {
+    save(prev => {
       const sKey = Object.keys(prev.columns).find(k => prev.columns[k].itemIds.includes(id)); 
       if (!sKey || sKey === d) return prev; 
       const start = prev.columns[sKey];
@@ -566,7 +562,7 @@ export default function App() {
   };
 
   const handleDeleteGame = (id) => { 
-    saveData(prev => {
+    save(prev => {
       const colKey = Object.keys(prev.columns).find(k => prev.columns[k].itemIds.includes(id));
       const ng = { ...prev.games }; 
       delete ng[id]; 
@@ -577,7 +573,7 @@ export default function App() {
   };
 
   const toggleFavorite = (id) => { 
-    saveData(prev => {
+    save(prev => {
       const g = prev.games[id]; 
       if (!g) return prev;
       return { ...prev, games: { ...prev.games, [id]: { ...g, isFavorite: !g.isFavorite } } };
@@ -589,7 +585,7 @@ export default function App() {
   
   const handleSaveColumn = (e) => { 
     e.preventDefault(); if (!columnForm.title.trim()) return; 
-    saveData(prev => {
+    save(prev => {
       let nd = { ...prev }; 
       if (isEditingColumn) nd.columns[columnForm.id] = { ...nd.columns[columnForm.id], title: columnForm.title, icon: columnForm.icon }; 
       else { nd.columns[columnForm.id] = { id: columnForm.id, title: columnForm.title, icon: columnForm.icon, itemIds: [] }; nd.columnOrder = [...nd.columnOrder, columnForm.id]; } 
@@ -600,18 +596,40 @@ export default function App() {
 
   const handleDeleteColumn = () => { 
     if (!isEditingColumn) return; 
-    if (!window.confirm("Delete list?")) return; 
     const colId = columnForm.id; 
-    saveData(prev => {
+    const otherCols = data.columnOrder.filter(id => id !== colId);
+
+    if (deleteMode === 'move' && otherCols.length === 0) {
+      alert("No other lists available. Choose delete or create another list first.");
+      return;
+    }
+
+    const dest = deleteMode === 'move' ? (deleteTarget || otherCols[0]) : null;
+
+    save(prev => {
       const newOrder = prev.columnOrder.filter(id => id !== colId); 
       const newCols = { ...prev.columns }; 
+      const itemsToMove = newCols[colId]?.itemIds || [];
+      let newGames = prev.games;
+
+      if (deleteMode === 'move' && dest && newCols[dest]) {
+        const deduped = itemsToMove.filter(id => !newCols[dest].itemIds.includes(id));
+        newCols[dest] = {
+          ...newCols[dest],
+          itemIds: [...deduped, ...newCols[dest].itemIds]
+        };
+      } else if (deleteMode === 'delete') {
+        newGames = { ...prev.games };
+        itemsToMove.forEach(id => { delete newGames[id]; });
+      }
+
       delete newCols[colId]; 
-      return { ...prev, columnOrder: newOrder, columns: newCols };
+      return { ...prev, columnOrder: newOrder, columns: newCols, games: newGames };
     });
     setIsColumnModalOpen(false); 
   };
 
-  const platforms = getUniquePlatforms();
+  const platforms = getUniquePlatforms(data);
   const showLanding = !isAuthLoading && !isDataLoading && user?.isAnonymous && (!data.games || Object.keys(data.games).length === 0);
 
   return (
@@ -643,21 +661,32 @@ export default function App() {
                   {isSearchingUsers ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                 </button>
               </form>
-              {userSearchResults.length > 0 && userSearchQuery && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-xl overflow-hidden p-1">
-                  {userSearchResults.map(res => (
-                    <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-slate-800 rounded-lg cursor-pointer">
-                      <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs">{res.displayName?.[0]}</div>
-                      <div>
-                        <div className="text-sm font-bold text-slate-200">{res.displayName}</div>
-                        <div className="text-xs text-slate-500 flex items-center gap-1">
-                          {res.privacy === 'invite_only' && <Lock size={10} />}
-                          {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
+              {(userSearchResults.length > 0 || userSearchError) && userSearchQuery && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-40 w-80">
+                  {userSearchError && <div className="px-3 py-2 text-xs text-red-300 bg-red-900/30 border-b border-red-800">{userSearchError}</div>}
+                  <div className="divide-y divide-slate-800 max-h-64 overflow-y-auto custom-scrollbar">
+                    {userSearchResults.map(res => (
+                      <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-slate-800 rounded-lg cursor-pointer">
+                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs uppercase text-white">{res.displayName?.[0]}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-bold text-slate-200 truncate">{res.displayName}</div>
+                          <div className="text-xs text-slate-500 flex items-center gap-1">
+                            {res.privacy === 'invite_only' && <Lock size={10} />}
+                            {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
+                          </div>
                         </div>
+                        <button onClick={() => openProfile(res)} className="p-1.5 bg-slate-800 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 transition-colors" title="View profile">
+                          <Users size={14} />
+                        </button>
+                        <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
+                          <UserPlus size={14} />
+                        </button>
                       </div>
-                      <button className="ml-auto p-1.5 bg-purple-600/20 text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white"><UserPlus size={14} /></button>
-                    </div>
-                  ))}
+                    ))}
+                    {userSearchResults.length === 0 && !userSearchError && (
+                      <div className="p-3 text-xs text-slate-500">No players found.</div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -665,7 +694,25 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
            {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
-           {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} />}
+           {!showLanding && !isDataLoading && !isFavoritesView && (
+             <button
+               onClick={() => setIsListView(!isListView)}
+               className={`p-2 rounded-full transition-colors ${isListView ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+               title={isListView ? "Grid view" : "List view"}
+             >
+               <List size={18} />
+             </button>
+           )}
+           {!showLanding && !isDataLoading && !isFavoritesView && (
+             <button
+               onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
+               className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+               title="Playlists"
+             >
+               <LayoutGrid size={18} />
+             </button>
+           )}
+           {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
            {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
         </div>
       </nav>
@@ -791,7 +838,7 @@ export default function App() {
           <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between mb-6">
               <button onClick={() => setZoomedColumnId(null)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ArrowLeft size={20} /><span className="font-semibold">Back to Board</span></button>
-              <div className="flex bg-slate-900 rounded-lg p-1">{data.columnOrder.map(colId => <button key={colId} onClick={() => setZoomedColumnId(colId)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${zoomedColumnId === colId ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>{data.columns[colId].title}</button>)}</div>
+              <div className="flex bg-slate-900 rounded-lg p-1">{data.columnOrder.map(colId => <button key={colId} onClick={() => setZoomedColumnId(colId)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${colId === zoomedColumnId ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>{data.columns[colId].title}</button>)}</div>
             </div>
             <div className="flex items-center gap-3 mb-6">
               <div className={`p-3 rounded-xl ${zoomedColumnId === 'backlog' ? 'bg-slate-800 text-slate-400' : zoomedColumnId === 'playing' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}><IconRenderer iconName={data.columns[zoomedColumnId].icon} size={32} /></div>
@@ -803,12 +850,63 @@ export default function App() {
             {data.columns[zoomedColumnId].itemIds.length === 0 && <div className="h-64 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl"><GripVertical size={32} className="mb-4 opacity-50" /><span className="text-lg">No games here yet</span></div>}
           </div>
         ) : (
-          <div className="flex justify-center h-full"> 
-            <div className="flex flex-col md:flex-row gap-6 items-start h-full overflow-x-auto pb-4 animate-in fade-in duration-500 max-w-full w-fit mx-auto px-4">
-              {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} />)}
-              {data.columnOrder.length < 5 && <div className="shrink-0 w-80 p-4"><button onClick={openAddColumnModal} className="w-full h-32 border-2 border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-600 hover:text-slate-400 hover:border-slate-600 hover:bg-slate-900/50 transition-all group"><Plus size={32} className="mb-2 group-hover:scale-110 transition-transform" /><span className="font-semibold">Create List</span></button></div>}
+          isListView ? (
+          <div className="max-w-6xl mx-auto px-4">
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-800 text-xs uppercase text-slate-500 tracking-wide">All Games</div>
+                <div className="divide-y divide-slate-800">
+                  {Object.values(data.games)
+                    .filter(g => activePlatformFilter === 'All' || g.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase()))
+                    .map(game => {
+                      const colId = data.columnOrder.find(c => data.columns[c].itemIds.includes(game.id)) || 'unknown';
+                      return (
+                        <div key={game.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 hover:bg-slate-900 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-16 rounded-md bg-slate-800 overflow-hidden bg-cover bg-center" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[(game.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-semibold text-white truncate">{game.title}</div>
+                                {game.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{game.rating}/10</span>}
+                              </div>
+                              <div className="text-xs text-slate-500 truncate">{game.platform} · {game.genre}</div>
+                              <div className="text-[11px] text-slate-500 mt-1">List: {data.columns[colId]?.title || 'Unknown'}</div>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 ml-auto">
+                            <button onClick={() => save(prev => ({ ...prev, games: { ...prev.games, [game.id]: { ...prev.games[game.id], isFavorite: !game.isFavorite } } }))} className={`p-2 rounded-md ${game.isFavorite ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-400 hover:text-red-400'}`} title="Favorite">
+                              <Heart size={16} className={game.isFavorite ? 'fill-current' : ''} />
+                            </button>
+                            <button onClick={() => openGameCard(game, false)} className="p-2 rounded-md bg-slate-800 text-slate-300 hover:text-white" title="Open">
+                              <Pencil size={16} />
+                            </button>
+                            <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                              {data.columnOrder.map(cid => (
+                                <button key={cid} onClick={() => handleManualMove(game.id, cid)} className={`px-2 py-1 rounded border ${cid === colId ? 'border-slate-700 text-slate-500' : 'border-slate-700 hover:border-purple-500 hover:text-white'}`}>
+                                  {data.columns[cid].title}
+                                </button>
+                              ))}
+                            </div>
+                            <button onClick={() => handleDeleteGame(game.id)} className="p-2 rounded-md bg-slate-800 text-red-400 hover:bg-red-900/30" title="Delete">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {Object.keys(data.games).length === 0 && (
+                    <div className="px-4 py-6 text-sm text-slate-500 text-center">No games yet.</div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex justify-center h-full"> 
+              <div className="flex flex-col md:flex-row gap-6 items-start h-full overflow-x-auto pb-4 animate-in fade-in duration-500 max-w-full w-fit mx-auto px-4">
+              {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} playlists={playlists} onAddToPlaylist={addGameToPlaylist} />)}
+                {data.columnOrder.length < 5 && <div className="shrink-0 w-80 p-4"><button onClick={openAddColumnModal} className="w-full h-32 border-2 border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-600 hover:text-slate-400 hover:border-slate-600 hover:bg-slate-900/50 transition-all group"><Plus size={32} className="mb-2 group-hover:scale-110 transition-transform" /><span className="font-semibold">Create List</span></button></div>}
+              </div>
+            </div>
+          )
         )}
       </main>
 
@@ -852,8 +950,430 @@ export default function App() {
         <form onSubmit={handleUpdateProfile} className="space-y-4"><p className="text-sm text-slate-400">Set a display name for your quest log.</p><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Display Name</label><input type="text" value={userSettings.displayName} onChange={(e) => setUserSettings({...userSettings, displayName: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" /></div><div className="pt-4 flex gap-3"><button type="button" onClick={() => setIsProfileModalOpen(false)} className="flex-1 px-4 py-2 text-slate-400 hover:bg-slate-800 rounded-lg">Cancel</button><button type="submit" className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg">Save Profile</button></div></form>
       </Modal>
 
+      {/* Duplicate game modal */}
+      <Modal isOpen={isDuplicateModalOpen} onClose={() => setIsDuplicateModalOpen(false)} title="Game already added">
+        <div className="space-y-4">
+          <div className="text-sm text-slate-400">You have this game already added to a list. Would you like to move it to a different list instead?</div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Choose destination list</label>
+            <select
+              value={duplicateTarget}
+              onChange={(e) => setDuplicateTarget(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm"
+            >
+              {data.columnOrder.map(cid => (
+                <option key={cid} value={cid}>{data.columns[cid].title}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setIsDuplicateModalOpen(false)} className="px-4 py-2 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 text-sm">Close</button>
+              <button
+                onClick={() => {
+                  if (duplicateInfo?.gameId && duplicateTarget) {
+                  handleManualMove(duplicateInfo.gameId, duplicateTarget);
+                }
+                setIsDuplicateModalOpen(false);
+              }}
+              className="px-4 py-2 rounded bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold"
+            >
+              Move game
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Profile View Modal */}
+      <Modal isOpen={isProfileViewOpen} onClose={() => setIsProfileViewOpen(false)} title={selectedProfile ? selectedProfile.displayName : 'Profile'}>
+        {selectedProfile ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase font-bold">
+                {selectedProfile.displayName?.[0] || 'P'}
+              </div>
+              <div className="flex-1">
+                <div className="text-lg font-semibold text-white">{selectedProfile.displayName}</div>
+                <div className="text-xs text-slate-500">{selectedProfile.privacy === 'invite_only' ? 'Invite only' : 'Public profile'}</div>
+              </div>
+              {user && selectedProfile.uid !== user.uid && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleFollowAction(selectedProfile)} className="px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold">
+                    {relationships.following[selectedProfile.uid] ? 'Unfollow' : (selectedProfile.privacy === 'invite_only' ? 'Request' : 'Follow')}
+                  </button>
+                  <button onClick={() => handleBlockAction(selectedProfile)} className="px-3 py-1.5 rounded bg-red-900/40 text-red-200 text-sm">Block</button>
+                </div>
+              )}
+            </div>
+            <div className="text-sm text-slate-400">{selectedProfile.bio || 'No bio provided.'}</div>
+            <div>
+              <div className="text-xs uppercase text-slate-500 mb-2">Board Preview</div>
+              {selectedProfileBoard ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {selectedProfileBoard.columnOrder.map(colId => (
+                    <div key={colId} className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                      <div className="text-sm font-semibold text-white mb-2">{selectedProfileBoard.columns[colId].title}</div>
+                      <div className="flex flex-col gap-2 max-h-48 overflow-y-auto custom-scrollbar">
+                        {selectedProfileBoard.columns[colId].itemIds.slice(0,5).map(id => (
+                          <div key={id} className="text-xs text-slate-300 truncate">{selectedProfileBoard.games[id]?.title || 'Untitled'}</div>
+                        ))}
+                        {selectedProfileBoard.columns[colId].itemIds.length === 0 && <div className="text-xs text-slate-600">Empty</div>}
+                        {selectedProfileBoard.columns[colId].itemIds.length > 5 && <div className="text-[11px] text-slate-500">+{selectedProfileBoard.columns[colId].itemIds.length - 5} more</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-slate-600">Loading board...</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500">Select a profile to view.</div>
+        )}
+      </Modal>
+
+      {/* Friends / Connections Modal */}
+      <Modal isOpen={isFriendsModalOpen} onClose={() => setIsFriendsModalOpen(false)} title="Connections">
+        <div className="space-y-4">
+          <section>
+            <div className="text-xs uppercase text-slate-500 mb-2">Following</div>
+            <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+              {Object.values(relationships.following || {}).map(p => (
+                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-white truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{p.status === 'pending' ? 'Request sent' : 'Following'}</div>
+                  </div>
+                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">View</button>
+                  <button onClick={() => unfollow(p.uid)} className="text-xs px-2 py-1 rounded bg-red-900/40 text-red-200">Unfollow</button>
+                </div>
+              ))}
+              {Object.keys(relationships.following || {}).length === 0 && <div className="text-xs text-slate-600">Not following anyone yet.</div>}
+            </div>
+          </section>
+
+          <section>
+            <div className="text-xs uppercase text-slate-500 mb-2">Followers</div>
+            <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+              {Object.values(relationships.followers || {}).map(p => (
+                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-white truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{p.status || 'Follower'}</div>
+                  </div>
+                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">View</button>
+                  <button onClick={() => handleBlockAction(p)} className="text-xs px-2 py-1 rounded bg-red-900/40 text-red-200">Block</button>
+                </div>
+              ))}
+              {Object.keys(relationships.followers || {}).length === 0 && <div className="text-xs text-slate-600">No followers yet.</div>}
+            </div>
+          </section>
+
+          <section>
+            <div className="text-xs uppercase text-slate-500 mb-2">Blocked</div>
+            <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
+              {Object.values(relationships.blocked || {}).map(p => (
+                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-white truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-slate-500 truncate">Blocked</div>
+                  </div>
+                  <button onClick={() => unblock(p.uid)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">Unblock</button>
+                </div>
+              ))}
+              {Object.keys(relationships.blocked || {}).length === 0 && <div className="text-xs text-slate-600">No blocked users.</div>}
+            </div>
+          </section>
+        </div>
+      </Modal>
+
+      {/* Playlists Modal - Redesigned */}
+      <Modal
+        isOpen={isPlaylistsModalOpen}
+        onClose={() => setIsPlaylistsModalOpen(false)}
+        title=""
+        contentClassName="max-w-6xl w-full h-[80vh]"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6 h-full">
+          {/* Left rail */}
+          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex flex-col gap-3 h-full">
+            <div className="text-sm font-semibold text-white px-2">Your Playlists</div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+              {playlists.length === 0 && (
+                <div className="text-xs text-slate-600 px-2 py-2">No playlists yet.</div>
+              )}
+              {playlists.map(pl => (
+                <button
+                  key={pl.id}
+                  onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
+                  className={`w-full text-left px-3 py-2 rounded-lg border ${selectedPlaylist?.id === pl.id ? 'border-purple-500 bg-purple-900/20 text-white' : 'border-slate-800 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:border-slate-700'} transition-colors`}
+                >
+                  <div className="text-sm font-semibold truncate">{pl.title}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{pl.items?.length || 0} games</div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => { setIsPlaylistDetailOpen(false); }}
+              className="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold"
+            >
+              Create New
+            </button>
+          </div>
+
+          {/* Right content */}
+          <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-4 flex flex-col gap-4">
+            {/* If a playlist is selected, show grid; else show create form */}
+            {isPlaylistDetailOpen && selectedPlaylist ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-bold text-white">{selectedPlaylist.title}</div>
+                    <div className="text-sm text-slate-500">{selectedPlaylist.description || 'No description'}</div>
+                    <div className="text-[11px] text-slate-500">By {selectedPlaylist.ownerName || 'Unknown'}</div>
+                  </div>
+                  <div className="text-[11px] text-slate-500">{selectedPlaylist.items?.length || 0} games</div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar">
+                  {(selectedPlaylist.items || []).map((item, idx) => {
+                    const exists = isGameOnBoard(data, item);
+                    return (
+                      <div key={`${item.title}-${idx}`} className={`rounded-lg border ${exists ? 'border-green-700 bg-green-900/15' : 'border-slate-800 bg-slate-900'} overflow-hidden`}>
+                        <div className="aspect-[3/4] bg-slate-800 bg-cover bg-center" style={{ background: item.cover ? `url(${item.cover}) center/cover` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
+                        <div className="p-2 space-y-1">
+                          <div className="text-sm font-semibold text-white truncate">{item.title}</div>
+                          <div className="text-[11px] text-slate-500 truncate">{item.platform} · {item.genre}</div>
+                          <div className="flex items-center gap-1">
+                            <select
+                              onChange={(e) => addPlaylistItemToList(item, e.target.value)}
+                              defaultValue=""
+                              className="w-full bg-slate-900 border border-slate-700 text-[11px] text-white rounded px-2 py-1"
+                            >
+                              <option value="" disabled>Add to list</option>
+                              {data.columnOrder.map(cid => (
+                                <option key={cid} value={cid}>{data.columns[cid].title}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(selectedPlaylist.items || []).length === 0 && <div className="text-sm text-slate-500 col-span-full">No games in this playlist.</div>}
+                </div>
+              </>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+                <div className="space-y-3">
+                  <div className="text-lg font-bold text-white">Browse public playlists</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto custom-scrollbar">
+                    {playlists.map(pl => (
+                      <button
+                        key={pl.id}
+                        onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
+                        className="rounded-lg border border-slate-800 bg-slate-900 hover:border-purple-500 hover:bg-slate-800 transition-colors text-left overflow-hidden"
+                      >
+                        <div className="aspect-[3/4] bg-gradient-to-br from-purple-700/40 to-blue-600/30 flex items-center justify-center text-white text-xs font-semibold">
+                          {pl.items?.[0]?.title ? pl.items[0].title.charAt(0) : 'P'}
+                        </div>
+                        <div className="p-2">
+                          <div className="text-sm font-semibold text-white truncate">{pl.title}</div>
+                          <div className="text-[11px] text-slate-500 truncate">{pl.items?.length || 0} games</div>
+                        </div>
+                      </button>
+                    ))}
+                    {playlists.length === 0 && <div className="text-sm text-slate-500 col-span-full">No playlists yet.</div>}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+                  <div className="text-sm font-semibold text-white mb-2">Create Playlist</div>
+                  <form onSubmit={handleCreatePlaylist} className="space-y-3">
+                    <input
+                      type="text"
+                      value={playlistForm.title}
+                      onChange={(e) => setPlaylistForm({ ...playlistForm, title: e.target.value })}
+                      placeholder="Playlist title"
+                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white"
+                      required
+                    />
+                    <textarea
+                      value={playlistForm.description}
+                      onChange={(e) => setPlaylistForm({ ...playlistForm, description: e.target.value })}
+                      placeholder="Description"
+                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white h-20"
+                    />
+                    <div className="text-xs uppercase text-slate-500">Search games to add</div>
+                    <form onSubmit={handlePlaylistSearch} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={playlistSearchQuery}
+                        onChange={(e) => setPlaylistSearchQuery(e.target.value)}
+                        placeholder="Search database..."
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white"
+                      />
+                      <button type="submit" disabled={isSearchingPlaylistGames} className="px-3 py-2 bg-purple-600 rounded text-white text-sm disabled:opacity-60">
+                        {isSearchingPlaylistGames ? 'Searching...' : 'Search'}
+                      </button>
+                    </form>
+                    {playlistSearchError && <div className="text-xs text-red-300 bg-red-900/30 border border-red-800 rounded p-2">{playlistSearchError}</div>}
+
+                    <div className="text-xs uppercase text-slate-500 pt-2">Select games</div>
+                    <div className="max-h-64 overflow-y-auto border border-slate-800 rounded-lg p-2 custom-scrollbar space-y-1">
+                      {[...Object.values(data.games).map(g => ({ ...g, source: 'board', pid: g.id })), ...playlistSearchResults.map(r => ({
+                        pid: `ext-${r.id}`,
+                        title: r.name,
+                        platform: r.platforms ? r.platforms.map(p => p.platform.name).slice(0,2).join(', ') : 'Unknown',
+                        genre: r.genres?.[0]?.name || '',
+                        year: r.released?.split('-')[0] || '',
+                        cover: r.background_image,
+                        source: 'search'
+                      }))].map(item => (
+                        <label key={item.pid} className="flex items-center gap-2 text-sm text-slate-300 bg-slate-900 rounded px-2 py-1 hover:bg-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={!!playlistForm.items[item.pid]}
+                            onChange={(e) => setPlaylistForm(prev => ({ ...prev, items: { ...prev.items, [item.pid]: e.target.checked } }))}
+                            className="accent-purple-600"
+                          />
+                          <span className="truncate">{item.title}</span>
+                          <span className="text-[11px] text-slate-500 truncate">{item.platform}</span>
+                          {item.source === 'board' && <span className="text-[10px] text-green-400 border border-green-700 px-1 rounded">On board</span>}
+                        </label>
+                      ))}
+                      {[...Object.values(data.games), ...playlistSearchResults].length === 0 && <div className="text-xs text-slate-600">No games available.</div>}
+                    </div>
+                    <button type="submit" disabled={isSavingPlaylist} className="w-full bg-purple-600 hover:bg-purple-500 text-white rounded p-2 font-semibold disabled:opacity-60">
+                      {isSavingPlaylist ? 'Saving...' : 'Save Playlist'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Playlist Detail Modal */}
+      <Modal isOpen={isPlaylistDetailOpen} onClose={() => setIsPlaylistDetailOpen(false)} title={selectedPlaylist ? selectedPlaylist.title : 'Playlist'}>
+        {selectedPlaylist ? (
+          <div className="space-y-4">
+            <div className="text-sm text-slate-400">{selectedPlaylist.description || 'No description'}</div>
+            <div className="text-xs text-slate-500">By {selectedPlaylist.ownerName || 'Unknown'}</div>
+            <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar">
+              {(selectedPlaylist.items || []).map((item, idx) => {
+                const exists = isGameOnBoard(data, item);
+                return (
+                  <div key={`${item.title}-${idx}`} className={`flex items-center gap-3 p-3 rounded-lg border ${exists ? 'border-green-700 bg-green-900/20' : 'border-slate-800 bg-slate-900'}`}>
+                    <div className="w-12 h-16 rounded-md bg-slate-800 overflow-hidden bg-cover bg-center" style={{ background: item.cover ? `url(${item.cover}) center/cover` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-white truncate">{item.title}</div>
+                        {item.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{item.rating}/10</span>}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">{item.platform} · {item.genre}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        onChange={(e) => addPlaylistItemToList(item, e.target.value)}
+                        defaultValue=""
+                        className="bg-slate-900 border border-slate-700 text-xs text-white rounded px-2 py-1"
+                      >
+                        <option value="" disabled>Add to list</option>
+                        {data.columnOrder.map(cid => (
+                          <option key={cid} value={cid}>{data.columns[cid].title}</option>
+                        ))}
+                      </select>
+                      <button onClick={() => addPlaylistItemToList(item, data.columnOrder[0])} className="p-2 rounded-md bg-slate-800 text-slate-300 hover:text-white" title="Quick add">
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {(selectedPlaylist.items || []).length === 0 && <div className="text-sm text-slate-500">No games in this playlist.</div>}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500">Select a playlist to view.</div>
+        )}
+      </Modal>
+
       <Modal isOpen={isColumnModalOpen} onClose={() => setIsColumnModalOpen(false)} title={isEditingColumn ? "Edit List" : "Create New List"}>
-        <form onSubmit={handleSaveColumn} className="space-y-6"><div><label className="block text-xs font-bold text-slate-500 uppercase mb-2">List Title</label><input autoFocus type="text" value={columnForm.title} onChange={(e) => setColumnForm({ ...columnForm, title: e.target.value })} placeholder="e.g. Wishlist" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase mb-2">Choose Icon</label><div className="grid grid-cols-6 gap-2">{Object.keys(COLUMN_ICONS).map(iconKey => (<button key={iconKey} type="button" onClick={() => setColumnForm({ ...columnForm, icon: iconKey })} className={`aspect-square flex items-center justify-center rounded-lg transition-all ${columnForm.icon === iconKey ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}><IconRenderer iconName={iconKey} size={20} /></button>))}</div></div><div className="pt-2 flex gap-3">{isEditingColumn && <button type="button" onClick={handleDeleteColumn} className="px-4 py-2 bg-red-900/20 text-red-400 hover:bg-red-900/40 rounded-lg border border-red-900/50"><Trash2 size={20} /></button>}<button type="button" onClick={() => setIsColumnModalOpen(false)} className="flex-1 px-4 py-2 text-slate-400 hover:bg-slate-800 rounded-lg">Cancel</button><button type="submit" className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg">{isEditingColumn ? "Save Changes" : "Create List"}</button></div></form>
+        <form onSubmit={handleSaveColumn} className="space-y-6">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">List Title</label>
+            <input autoFocus type="text" value={columnForm.title} onChange={(e) => setColumnForm({ ...columnForm, title: e.target.value })} placeholder="e.g. Wishlist" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Choose Icon</label>
+            <div className="grid grid-cols-6 gap-2">
+              {Object.keys(COLUMN_ICONS).map(iconKey => (
+                <button key={iconKey} type="button" onClick={() => setColumnForm({ ...columnForm, icon: iconKey })} className={`aspect-square flex items-center justify-center rounded-lg transition-all ${columnForm.icon === iconKey ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                  <IconRenderer iconName={iconKey} size={20} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isEditingColumn && (
+            <div className="space-y-3 p-3 border border-slate-800 rounded-lg bg-slate-900/40">
+              <div className="text-sm font-semibold text-slate-200">When deleting this list</div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-slate-300 text-sm">
+                  <input
+                    type="radio"
+                    name="deleteMode"
+                    value="move"
+                    checked={deleteMode === 'move'}
+                    onChange={() => setDeleteMode('move')}
+                    className="accent-purple-600"
+                  />
+                  Move games to another list
+                </label>
+                <div className="pl-6">
+                  <select
+                    value={deleteTarget}
+                    onChange={(e) => setDeleteTarget(e.target.value)}
+                    disabled={data.columnOrder.filter(id => id !== columnForm.id).length === 0}
+                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white disabled:opacity-50"
+                  >
+                    {data.columnOrder.filter(id => id !== columnForm.id).map(colId => (
+                      <option key={colId} value={colId}>{data.columns[colId].title}</option>
+                    ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-slate-300 text-sm">
+                  <input
+                    type="radio"
+                    name="deleteMode"
+                    value="delete"
+                    checked={deleteMode === 'delete'}
+                    onChange={() => setDeleteMode('delete')}
+                    className="accent-red-500"
+                  />
+                  Delete games along with this list
+                </label>
+                <div className="text-xs text-slate-500">
+                  {data.columns[columnForm.id]?.itemIds?.length || 0} games currently in this list.
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button type="button" onClick={handleDeleteColumn} className="px-3 py-2 bg-red-900/30 text-red-300 rounded border border-red-800 hover:bg-red-900/50">
+                  Delete List
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2 flex gap-3">
+            <button type="button" onClick={() => setIsColumnModalOpen(false)} className="flex-1 px-4 py-2 text-slate-400 hover:bg-slate-800 rounded-lg">Cancel</button>
+            <button type="submit" className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg">{isEditingColumn ? "Save Changes" : "Create List"}</button>
+          </div>
+        </form>
       </Modal>
 
       <style>{` .custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 20px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #475569; } `}</style>

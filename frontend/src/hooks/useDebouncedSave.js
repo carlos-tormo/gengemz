@@ -1,14 +1,14 @@
-import { useState, useRef, useCallback } from 'react';
-import { doc, setDoc } from "firebase/firestore";
-import { db, APP_ID } from '../config/firebase';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { doc, setDoc } from 'firebase/firestore';
+import { db, APP_ID } from '../config/firebase'; // Assuming APP_ID is also used here
 
-export const useDebouncedSave = (user) => {
+const useDebouncedSave = (user) => {
   const [status, setStatus] = useState('idle'); 
   const timeoutRef = useRef(null);
 
   const save = useCallback((newData) => {
     if (!user) {
-      setStatus('idle'); 
+      setStatus('idle'); // No user yet, don't error out
       return;
     }
     
@@ -28,5 +28,14 @@ export const useDebouncedSave = (user) => {
     }, 1000); 
   }, [user]);
 
-  return { status, save, setStatus };
+  // Clear pending timeout on unmount to avoid late writes/state updates
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return { status, save };
 };
+
+export default useDebouncedSave;

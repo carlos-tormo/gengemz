@@ -1,6 +1,14 @@
 import { 
-  Clock, Gamepad2, Trophy, Star, Heart, Zap, Skull, Flame, Bookmark, Sword, Target, Ghost 
+  Clock, Gamepad2, Trophy, Star, Heart, 
+  Zap, Skull, Flame, Bookmark, Sword, 
+  Target, Ghost 
 } from 'lucide-react';
+
+export const COLUMN_ICONS = {
+  clock: Clock, gamepad: Gamepad2, trophy: Trophy, star: Star, heart: Heart, 
+  zap: Zap, skull: Skull, flame: Flame, bookmark: Bookmark, sword: Sword, 
+  target: Target, ghost: Ghost
+};
 
 export const PLACEHOLDER_COVERS = [
   "linear-gradient(to bottom right, #ef4444, #b91c1c)",
@@ -10,6 +18,9 @@ export const PLACEHOLDER_COVERS = [
   "linear-gradient(to bottom right, #f59e0b, #b45309)",
 ];
 
+export const APP_ID = 'gengemz-prod'; 
+export const BACKEND_URL = "https://us-central1-gengemztest-958e.cloudfunctions.net/searchGames";
+
 export const INITIAL_DATA = {
   games: {},
   columns: {
@@ -18,19 +29,4 @@ export const INITIAL_DATA = {
     'completed': { id: 'completed', title: 'Victory Road', icon: 'trophy', itemIds: [] },
   },
   columnOrder: ['backlog', 'playing', 'completed'],
-};
-
-export const COLUMN_ICONS = {
-  clock: Clock,
-  gamepad: Gamepad2,
-  trophy: Trophy,
-  star: Star,
-  heart: Heart,
-  zap: Zap,
-  skull: Skull,
-  flame: Flame,
-  bookmark: Bookmark,
-  sword: Sword,
-  target: Target,
-  ghost: Ghost
 };
