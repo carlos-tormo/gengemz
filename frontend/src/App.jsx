@@ -3,7 +3,7 @@ import {
   Plus, MoreVertical, Gamepad2, X, GripVertical, Trash2,
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
   ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid, List,
-  Pencil, Lock, Unlock, Calendar, Heart,
+  Pencil, Lock, Unlock, Calendar, Heart, Star,
   Settings, Users, UserPlus, Shield, Wrench, Database
 } from 'lucide-react';
 // Firebase imports
