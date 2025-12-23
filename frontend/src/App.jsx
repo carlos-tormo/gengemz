@@ -4,7 +4,7 @@ import {
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
   ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid, List,
   Pencil, Lock, Unlock, Calendar, Heart, Star,
-  Settings, Users, UserPlus, Shield, Wrench, Database
+  Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun
 } from 'lucide-react';
 // Firebase imports
 import { auth, db } from './config/firebase';
@@ -105,6 +105,7 @@ export default function App() {
   const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
   const [duplicateTarget, setDuplicateTarget] = useState('');
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [theme, setTheme] = useState('dark');
 
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
@@ -115,8 +116,35 @@ export default function App() {
 
   const dataRef = useRef(INITIAL_DATA);
   const userRef = useRef(null);
+  const userSearchRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('ggz-theme');
+      if (stored === 'light' || stored === 'dark') setTheme(stored);
+    } catch (err) {
+      console.error('Theme load failed', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ggz-theme', theme);
+    } catch (err) {
+      console.error('Theme save failed', err);
+    }
+    const root = document.documentElement;
+    root.classList.remove('theme-dark', 'theme-light');
+    root.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark');
+  }, [theme]);
+
+  useClickOutside(userSearchRef, () => {
+    setUserSearchResults([]);
+    setUserSearchError(null);
+  });
 
   // Load playlists (public)
   useEffect(() => {
@@ -630,20 +658,21 @@ export default function App() {
 
   const platforms = getUniquePlatforms(data);
   const showLanding = !isAuthLoading && !isDataLoading && user?.isAnonymous && (!data.games || Object.keys(data.games).length === 0);
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans relative flex flex-col selection:bg-purple-500/30 selection:text-purple-200">
+    <div className={`min-h-screen ${theme === 'light' ? 'theme-light' : 'theme-dark'} bg-[var(--bg)] text-[var(--text)] font-sans relative flex flex-col selection:bg-[var(--accent)] selection:text-[var(--panel)] transition-colors`}>
       <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 transition-opacity duration-300 ${saveStatus === 'idle' ? 'opacity-50 hover:opacity-100' : 'opacity-100'}`}>
         <div className="text-[10px] text-slate-600 font-mono bg-slate-900/50 px-2 py-1 rounded">{user ? `ID: ${user.uid.slice(0, 6)}...` : 'No User'}</div>
         <div className={`bg-slate-800 border ${saveStatus === 'error' ? 'border-red-500' : 'border-slate-700'} rounded-full px-4 py-2 flex items-center gap-2 shadow-xl`}>{saveStatus === 'saving' ? <><Loader2 size={16} className="animate-spin text-purple-400" /><span className="text-xs font-medium text-slate-300">Saving...</span></> : saveStatus === 'error' ? <><WifiOff size={16} className="text-red-400" /><span className="text-xs font-medium text-red-300">Sync Error</span></> : <><Check size={16} className="text-green-400" /><span className="text-xs font-medium text-slate-300">Saved</span></>}</div>
       </div>
 
-      <nav className="fixed top-0 left-0 right-0 h-16 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 z-40 flex items-center justify-between px-4 md:px-8">
+      <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--glass)] backdrop-blur-md border-b border-[var(--border)] z-40 flex items-center justify-between px-4 md:px-8">
         <div className="flex items-center gap-3">
           <div className="bg-gradient-to-br from-purple-600 to-blue-600 p-2 rounded-lg shadow-lg shadow-purple-500/20"><Gamepad2 size={24} className="text-white" /></div>
           <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden sm:block">Gengemz</h1>
           {!showLanding && (
-            <div className="hidden md:flex ml-8 relative group">
+            <div className="hidden md:flex ml-8 relative group" ref={userSearchRef}>
               <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-purple-400" size={16} />
               <form onSubmit={handleUserSearch} className="relative">
                 <input 
@@ -651,39 +680,39 @@ export default function App() {
                   placeholder="Find players..." 
                   value={userSearchQuery}
                   onChange={(e) => { setUserSearchQuery(e.target.value); }}
-                  className="bg-slate-900 border border-slate-800 rounded-full pl-9 pr-10 py-2 text-sm text-white focus:border-purple-500 focus:w-64 w-48 transition-all outline-none"
+                  className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:w-64 w-48 transition-all outline-none placeholder:text-[var(--text-muted)]"
                 />
                 <button 
                   type="submit"
-                  className="absolute right-2 top-1.5 p-1 bg-slate-800 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+                  className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
                 >
                   {isSearchingUsers ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                 </button>
               </form>
               {(userSearchResults.length > 0 || userSearchError) && userSearchQuery && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-40 w-80">
-                  {userSearchError && <div className="px-3 py-2 text-xs text-red-300 bg-red-900/30 border-b border-red-800">{userSearchError}</div>}
-                  <div className="divide-y divide-slate-800 max-h-64 overflow-y-auto custom-scrollbar">
+                <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-80">
+                  {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
+                  <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
                     {userSearchResults.map(res => (
-                      <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-slate-800 rounded-lg cursor-pointer">
-                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs uppercase text-white">{res.displayName?.[0]}</div>
+                      <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
+                        <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-slate-200 truncate">{res.displayName}</div>
-                          <div className="text-xs text-slate-500 flex items-center gap-1">
+                          <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
+                          <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
                             {res.privacy === 'invite_only' && <Lock size={10} />}
                             {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
                           </div>
                         </div>
-                        <button onClick={() => openProfile(res)} className="p-1.5 bg-slate-800 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 transition-colors" title="View profile">
+                        <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
                           <Users size={14} />
                         </button>
-                        <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
+                        <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
                           <UserPlus size={14} />
                         </button>
                       </div>
                     ))}
                     {userSearchResults.length === 0 && !userSearchError && (
-                      <div className="p-3 text-xs text-slate-500">No players found.</div>
+                      <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
                     )}
                   </div>
                 </div>
@@ -692,6 +721,15 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-4">
+           {!isDataLoading && (
+             <button
+               onClick={toggleTheme}
+               className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+               title={theme === 'dark' ? "Switch to light mode" : "Switch to dark mode"}
+             >
+               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+             </button>
+           )}
            {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
            {!showLanding && !isDataLoading && !isFavoritesView && (
              <button
@@ -806,15 +844,15 @@ export default function App() {
       </Modal>
 
       {!showLanding && !isDataLoading && !zoomedColumnId && !isFavoritesView && platforms.length > 1 && (
-        <div className="fixed top-16 left-0 right-0 h-12 bg-slate-950/90 backdrop-blur border-b border-slate-800 z-30 flex items-center justify-center px-4 overflow-x-auto">
+        <div className="fixed top-16 left-0 right-0 h-12 bg-[var(--glass)] backdrop-blur border-b border-[var(--border)] z-30 flex items-center justify-center px-4 overflow-x-auto">
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
-            <Filter size={14} className="text-slate-500 mr-2 shrink-0" />
+            <Filter size={14} className="text-[var(--text-muted)] mr-2 shrink-0" />
             <div className="flex-1 flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1">
               {platforms.map(p => (
-                <button key={p} onClick={() => setActivePlatformFilter(p)} className={`px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${activePlatformFilter === p ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>{p}</button>
+                <button key={p} onClick={() => setActivePlatformFilter(p)} className={`px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${activePlatformFilter === p ? 'bg-[var(--accent)] text-white shadow-lg' : 'bg-[var(--panel)] text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)]'}`}>{p}</button>
               ))}
             </div>
-            {hiddenGamesCount > 0 && <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-slate-800 animate-in fade-in slide-in-from-left-2"><EyeOff size={14} className="text-slate-600" /><span className="text-xs text-slate-500 font-medium whitespace-nowrap">{hiddenGamesCount} hidden</span></div>}
+            {hiddenGamesCount > 0 && <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-[var(--border)] animate-in fade-in slide-in-from-left-2"><EyeOff size={14} className="text-[var(--text-muted)]" /><span className="text-xs text-[var(--text-muted)] font-medium whitespace-nowrap">{hiddenGamesCount} hidden</span></div>}
           </div>
         </div>
       )}
@@ -826,12 +864,30 @@ export default function App() {
           <LandingPage onStart={() => setIsAddModalOpen(true)} onLogin={handleLogin} />
         ) : isFavoritesView ? (
           <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
-            <div className="flex items-center justify-between mb-6"><button onClick={() => setIsFavoritesView(false)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ArrowLeft size={20} /><span className="font-semibold">Back to Board</span></button></div>
-            <div className="flex items-center gap-3 mb-6"><div className="p-3 rounded-xl bg-red-500/20 text-red-400"><Heart size={32} className="fill-current" /></div><div><h2 className="text-3xl font-bold text-white">Favorites Vault</h2><p className="text-slate-500 text-sm">{favoriteGames.length} cherished titles</p></div></div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            <div className="flex items-center justify-between mb-6">
+              <button onClick={() => setIsFavoritesView(false)} className="flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
+                <ArrowLeft size={20} />
+                <span className="font-semibold">Back to Board</span>
+              </button>
+            </div>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 rounded-xl bg-red-100 text-red-500 dark:bg-red-500/20 dark:text-red-400">
+                <Heart size={32} className="fill-current" />
+              </div>
+              <div>
+                <h2 className="text-3xl font-bold text-[var(--text)]">Favorites Vault</h2>
+                <p className="text-[var(--text-muted)] text-sm">{favoriteGames.length} cherished titles</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl-grid-cols-5 gap-6">
               {favoriteGames.map(game => <GridGameCard key={game.id} game={game} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEdit={openGameCard} onToggleFavorite={toggleFavorite} />)}
             </div>
-            {favoriteGames.length === 0 && <div className="h-64 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl"><Heart size={32} className="mb-4 opacity-50" /><span className="text-lg">No favorites yet. Add some love!</span></div>}
+            {favoriteGames.length === 0 && (
+              <div className="h-64 flex flex-col items-center justify-center text-[var(--text-muted)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--panel)]/30">
+                <Heart size={32} className="mb-4 opacity-50" />
+                <span className="text-lg">No favorites yet. Add some love!</span>
+              </div>
+            )}
           </div>
         ) : zoomedColumnId ? (
           <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
@@ -851,41 +907,41 @@ export default function App() {
         ) : (
           isListView ? (
           <div className="max-w-6xl mx-auto px-4">
-              <div className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-800 text-xs uppercase text-slate-500 tracking-wide">All Games</div>
-                <div className="divide-y divide-slate-800">
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl overflow-hidden shadow-sm">
+                <div className="px-4 py-3 border-b border-[var(--border)] text-xs uppercase text-[var(--text-muted)] tracking-wide">All Games</div>
+                <div className="divide-y divide-[var(--border)]">
                   {Object.values(data.games)
                     .filter(g => activePlatformFilter === 'All' || g.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase()))
                     .map(game => {
                       const colId = data.columnOrder.find(c => data.columns[c].itemIds.includes(game.id)) || 'unknown';
                       return (
-                        <div key={game.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 hover:bg-slate-900 transition-colors">
+                        <div key={game.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 hover:bg-[var(--panel-muted)] transition-colors">
                           <div className="flex items-center gap-3">
-                            <div className="w-12 h-16 rounded-md bg-slate-800 overflow-hidden bg-cover bg-center" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[(game.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
+                            <div className="w-12 h-16 rounded-md bg-[var(--panel-muted)] overflow-hidden bg-cover bg-center border border-[var(--border)]" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[(game.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
-                                <div className="text-sm font-semibold text-white truncate">{game.title}</div>
-                                {game.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{game.rating}/10</span>}
+                                <div className="text-sm font-semibold text-[var(--text)] truncate">{game.title}</div>
+                                {game.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--panel-muted)] text-[var(--text)] border border-[var(--border)]">{game.rating}/10</span>}
                               </div>
-                              <div className="text-xs text-slate-500 truncate">{game.platform} · {game.genre}</div>
-                              <div className="text-[11px] text-slate-500 mt-1">List: {data.columns[colId]?.title || 'Unknown'}</div>
+                              <div className="text-xs text-[var(--text-muted)] truncate">{game.platform} · {game.genre}</div>
+                              <div className="text-[11px] text-[var(--text-muted)] mt-1">List: {data.columns[colId]?.title || 'Unknown'}</div>
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 ml-auto">
-                            <button onClick={() => save(prev => ({ ...prev, games: { ...prev.games, [game.id]: { ...prev.games[game.id], isFavorite: !game.isFavorite } } }))} className={`p-2 rounded-md ${game.isFavorite ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-400 hover:text-red-400'}`} title="Favorite">
+                            <button onClick={() => save(prev => ({ ...prev, games: { ...prev.games, [game.id]: { ...prev.games[game.id], isFavorite: !game.isFavorite } } }))} className={`p-2 rounded-md border ${game.isFavorite ? 'bg-red-100 text-red-600 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/50' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)] hover:text-red-500 hover:border-red-300'}`} title="Favorite">
                               <Heart size={16} className={game.isFavorite ? 'fill-current' : ''} />
                             </button>
-                            <button onClick={() => openGameCard(game, false)} className="p-2 rounded-md bg-slate-800 text-slate-300 hover:text-white" title="Open">
+                            <button onClick={() => openGameCard(game, false)} className="p-2 rounded-md bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]" title="Open">
                               <Pencil size={16} />
                             </button>
                             <div className="flex items-center gap-1 text-[11px] text-slate-400">
                               {data.columnOrder.map(cid => (
-                                <button key={cid} onClick={() => handleManualMove(game.id, cid)} className={`px-2 py-1 rounded border ${cid === colId ? 'border-slate-700 text-slate-500' : 'border-slate-700 hover:border-purple-500 hover:text-white'}`}>
+                                <button key={cid} onClick={() => handleManualMove(game.id, cid)} className={`px-2 py-1 rounded border text-[var(--text-muted)] ${cid === colId ? 'border-[var(--border)] bg-[var(--panel-muted)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--text)]'}`}>
                                   {data.columns[cid].title}
                                 </button>
                               ))}
                             </div>
-                            <button onClick={() => handleDeleteGame(game.id)} className="p-2 rounded-md bg-slate-800 text-red-400 hover:bg-red-900/30" title="Delete">
+                            <button onClick={() => handleDeleteGame(game.id)} className="p-2 rounded-md bg-[var(--panel)] text-red-600 border border-[var(--border)] hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900/30" title="Delete">
                               <Trash2 size={16} />
                             </button>
                           </div>
@@ -893,7 +949,7 @@ export default function App() {
                       );
                     })}
                   {Object.keys(data.games).length === 0 && (
-                    <div className="px-4 py-6 text-sm text-slate-500 text-center">No games yet.</div>
+                    <div className="px-4 py-6 text-sm text-[var(--text-muted)] text-center">No games yet.</div>
                   )}
                 </div>
               </div>
@@ -902,7 +958,17 @@ export default function App() {
             <div className="flex justify-center h-full"> 
               <div className="flex flex-col md:flex-row gap-6 items-start h-full overflow-x-auto pb-4 animate-in fade-in duration-500 max-w-full w-fit mx-auto px-4">
               {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} playlists={playlists} onAddToPlaylist={addGameToPlaylist} />)}
-                {data.columnOrder.length < 5 && <div className="shrink-0 w-80 p-4"><button onClick={openAddColumnModal} className="w-full h-32 border-2 border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-600 hover:text-slate-400 hover:border-slate-600 hover:bg-slate-900/50 transition-all group"><Plus size={32} className="mb-2 group-hover:scale-110 transition-transform" /><span className="font-semibold">Create List</span></button></div>}
+                {data.columnOrder.length < 5 && (
+                  <div className="shrink-0 w-80 p-4">
+                    <button
+                      onClick={openAddColumnModal}
+                      className="w-full h-32 border-2 border-dashed border-[var(--border)] rounded-xl flex flex-col items-center justify-center text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--panel-muted)] transition-all group bg-[var(--panel)]"
+                    >
+                      <Plus size={32} className="mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="font-semibold">Create List</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -939,9 +1005,55 @@ export default function App() {
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add to your games...">
         <div className="space-y-4">
-          <form onSubmit={searchGames} className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 text-slate-500" size={18} /><input autoFocus type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search database..." className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2.5 text-white focus:outline-none focus:border-purple-500" /></div><button type="submit" disabled={isSearching} className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg disabled:opacity-50">{isSearching ? <Loader2 className="animate-spin" size={20} /> : 'Search'}</button></form>
-          {searchError && <div className="p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-200 text-sm">{searchError}</div>}
-          <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">{searchResults.map(game => (<button key={game.id} onClick={() => handleAddGameFromSearch(game)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700 transition-all text-left group"><div className="w-12 h-16 bg-slate-900 rounded shrink-0 bg-cover bg-center shadow-sm" style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}>{!game.background_image && <ImageIcon className="w-full h-full p-3 text-slate-700" />}</div><div className="flex-1 min-w-0"><h4 className="font-semibold text-slate-200 group-hover:text-white truncate">{game.name}</h4><div className="flex items-center gap-2 text-xs text-slate-500"><span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>{game.metacritic && (<span className={`px-1.5 rounded ${game.metacritic >= 75 ? 'bg-green-900/50 text-green-400' : game.metacritic >= 50 ? 'bg-yellow-900/50 text-yellow-400' : 'bg-slate-700 text-slate-400'}`}>{game.metacritic}</span>)}</div></div><Plus size={18} className="text-slate-600 group-hover:text-purple-400" /></button>))}</div>
+          <form onSubmit={searchGames} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={18} />
+              <input
+                autoFocus
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search database..."
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg pl-10 pr-4 py-2.5 text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="px-4 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg disabled:opacity-50"
+            >
+              {isSearching ? <Loader2 className="animate-spin" size={20} /> : 'Search'}
+            </button>
+          </form>
+          {searchError && <div className="p-3 bg-red-100 border border-red-200 rounded-lg text-red-700 text-sm">{searchError}</div>}
+          <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
+            {searchResults.map(game => (
+              <button
+                key={game.id}
+                onClick={() => handleAddGameFromSearch(game)}
+                className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--panel-muted)] border border-transparent hover:border-[var(--accent)]/40 transition-all text-left group bg-[var(--panel)]"
+              >
+                <div
+                  className="w-12 h-16 bg-[var(--panel-muted)] rounded shrink-0 bg-cover bg-center shadow-sm border border-[var(--border)]"
+                  style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                >
+                  {!game.background_image && <ImageIcon className="w-full h-full p-3 text-[var(--text-muted)]" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-semibold text-[var(--text)] group-hover:text-[var(--accent)] truncate">{game.name}</h4>
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
+                    {game.metacritic && (
+                      <span className={`px-1.5 rounded ${game.metacritic >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' : game.metacritic >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' : 'bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]'}`}>
+                        {game.metacritic}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Plus size={18} className="text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
+              </button>
+            ))}
+          </div>
         </div>
       </Modal>
 
@@ -987,47 +1099,47 @@ export default function App() {
         {selectedProfile ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase font-bold">
+              <div className="w-12 h-12 rounded-full bg-[var(--panel-muted)] text-[var(--text)] flex items-center justify-center uppercase font-bold border border-[var(--border)]">
                 {selectedProfile.displayName?.[0] || 'P'}
               </div>
               <div className="flex-1">
-                <div className="text-lg font-semibold text-white">{selectedProfile.displayName}</div>
-                <div className="text-xs text-slate-500">{selectedProfile.privacy === 'invite_only' ? 'Invite only' : 'Public profile'}</div>
+                <div className="text-lg font-semibold text-[var(--text)]">{selectedProfile.displayName}</div>
+                <div className="text-xs text-[var(--text-muted)]">{selectedProfile.privacy === 'invite_only' ? 'Invite only' : 'Public profile'}</div>
               </div>
               {user && selectedProfile.uid !== user.uid && (
                 <div className="flex gap-2">
-                  <button onClick={() => handleFollowAction(selectedProfile)} className="px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold">
+                  <button onClick={() => handleFollowAction(selectedProfile)} className="px-3 py-1.5 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold">
                     {relationships.following[selectedProfile.uid] ? 'Unfollow' : (selectedProfile.privacy === 'invite_only' ? 'Request' : 'Follow')}
                   </button>
-                  <button onClick={() => handleBlockAction(selectedProfile)} className="px-3 py-1.5 rounded bg-red-900/40 text-red-200 text-sm">Block</button>
+                  <button onClick={() => handleBlockAction(selectedProfile)} className="px-3 py-1.5 rounded bg-red-100 text-red-700 text-sm border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
                 </div>
               )}
             </div>
-            <div className="text-sm text-slate-400">{selectedProfile.bio || 'No bio provided.'}</div>
+            <div className="text-sm text-[var(--text)]">{selectedProfile.bio || 'No bio provided.'}</div>
             <div>
-              <div className="text-xs uppercase text-slate-500 mb-2">Board Preview</div>
+              <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Board Preview</div>
               {selectedProfileBoard ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {selectedProfileBoard.columnOrder.map(colId => (
-                    <div key={colId} className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                      <div className="text-sm font-semibold text-white mb-2">{selectedProfileBoard.columns[colId].title}</div>
+                    <div key={colId} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg p-3 shadow-sm">
+                      <div className="text-sm font-semibold text-[var(--text)] mb-2">{selectedProfileBoard.columns[colId].title}</div>
                       <div className="flex flex-col gap-2 max-h-48 overflow-y-auto custom-scrollbar">
                         {selectedProfileBoard.columns[colId].itemIds.slice(0,5).map(id => (
-                          <div key={id} className="text-xs text-slate-300 truncate">{selectedProfileBoard.games[id]?.title || 'Untitled'}</div>
+                          <div key={id} className="text-xs text-[var(--text)] truncate">{selectedProfileBoard.games[id]?.title || 'Untitled'}</div>
                         ))}
-                        {selectedProfileBoard.columns[colId].itemIds.length === 0 && <div className="text-xs text-slate-600">Empty</div>}
-                        {selectedProfileBoard.columns[colId].itemIds.length > 5 && <div className="text-[11px] text-slate-500">+{selectedProfileBoard.columns[colId].itemIds.length - 5} more</div>}
+                        {selectedProfileBoard.columns[colId].itemIds.length === 0 && <div className="text-xs text-[var(--text-muted)]">Empty</div>}
+                        {selectedProfileBoard.columns[colId].itemIds.length > 5 && <div className="text-[11px] text-[var(--text-muted)]">+{selectedProfileBoard.columns[colId].itemIds.length - 5} more</div>}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-sm text-slate-600">Loading board...</div>
+                <div className="text-sm text-[var(--text-muted)]">Loading board...</div>
               )}
             </div>
           </div>
         ) : (
-          <div className="text-sm text-slate-500">Select a profile to view.</div>
+          <div className="text-sm text-[var(--text-muted)]">Select a profile to view.</div>
         )}
       </Modal>
 
@@ -1098,58 +1210,58 @@ export default function App() {
       >
         <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6 h-full">
           {/* Left rail */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex flex-col gap-3 h-full">
-            <div className="text-sm font-semibold text-white px-2">Your Playlists</div>
+          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3 h-full">
+            <div className="text-sm font-semibold text-[var(--text)] px-2">Your Playlists</div>
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1">
               {playlists.length === 0 && (
-                <div className="text-xs text-slate-600 px-2 py-2">No playlists yet.</div>
+                <div className="text-xs text-[var(--text-muted)] px-2 py-2">No playlists yet.</div>
               )}
               {playlists.map(pl => (
                 <button
                   key={pl.id}
                   onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg border ${selectedPlaylist?.id === pl.id ? 'border-purple-500 bg-purple-900/20 text-white' : 'border-slate-800 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:border-slate-700'} transition-colors`}
+                  className={`w-full text-left px-3 py-2 rounded-lg border ${selectedPlaylist?.id === pl.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel-strong)]' } transition-colors`}
                 >
                   <div className="text-sm font-semibold truncate">{pl.title}</div>
-                  <div className="text-[11px] text-slate-500 truncate">{pl.items?.length || 0} games</div>
+                  <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
                 </button>
               ))}
             </div>
             <button
               onClick={() => { setIsPlaylistDetailOpen(false); }}
-              className="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold"
+              className="w-full px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold"
             >
               Create New
             </button>
           </div>
 
           {/* Right content */}
-          <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-4 flex flex-col gap-4">
+          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-4 flex flex-col gap-4">
             {/* If a playlist is selected, show grid; else show create form */}
             {isPlaylistDetailOpen && selectedPlaylist ? (
               <>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-lg font-bold text-white">{selectedPlaylist.title}</div>
-                    <div className="text-sm text-slate-500">{selectedPlaylist.description || 'No description'}</div>
-                    <div className="text-[11px] text-slate-500">By {selectedPlaylist.ownerName || 'Unknown'}</div>
+                    <div className="text-lg font-bold text-[var(--text)]">{selectedPlaylist.title}</div>
+                    <div className="text-sm text-[var(--text-muted)]">{selectedPlaylist.description || 'No description'}</div>
+                    <div className="text-[11px] text-[var(--text-muted)]">By {selectedPlaylist.ownerName || 'Unknown'}</div>
                   </div>
-                  <div className="text-[11px] text-slate-500">{selectedPlaylist.items?.length || 0} games</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{selectedPlaylist.items?.length || 0} games</div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar">
                   {(selectedPlaylist.items || []).map((item, idx) => {
                     const exists = isGameOnBoard(data, item);
                     return (
-                      <div key={`${item.title}-${idx}`} className={`rounded-lg border ${exists ? 'border-green-700 bg-green-900/15' : 'border-slate-800 bg-slate-900'} overflow-hidden`}>
+                      <div key={`${item.title}-${idx}`} className={`rounded-lg border ${exists ? 'border-green-600 bg-green-100 dark:bg-green-900/15' : 'border-[var(--border)] bg-[var(--panel-muted)]'} overflow-hidden`}>
                         <div className="aspect-[3/4] bg-slate-800 bg-cover bg-center" style={{ background: item.cover ? `url(${item.cover}) center/cover` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
                         <div className="p-2 space-y-1">
-                          <div className="text-sm font-semibold text-white truncate">{item.title}</div>
-                          <div className="text-[11px] text-slate-500 truncate">{item.platform} · {item.genre}</div>
+                          <div className="text-sm font-semibold text-[var(--text)] truncate">{item.title}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">{item.platform} · {item.genre}</div>
                           <div className="flex items-center gap-1">
                             <select
                               onChange={(e) => addPlaylistItemToList(item, e.target.value)}
                               defaultValue=""
-                              className="w-full bg-slate-900 border border-slate-700 text-[11px] text-white rounded px-2 py-1"
+                              className="w-full bg-[var(--panel)] border border-[var(--border)] text-[11px] text-[var(--text)] rounded px-2 py-1"
                             >
                               <option value="" disabled>Add to list</option>
                               {data.columnOrder.map(cid => (
@@ -1167,61 +1279,61 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
                 <div className="space-y-3">
-                  <div className="text-lg font-bold text-white">Browse public playlists</div>
+                  <div className="text-lg font-bold text-[var(--text)]">Browse public playlists</div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto custom-scrollbar">
                     {playlists.map(pl => (
                       <button
                         key={pl.id}
                         onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
-                        className="rounded-lg border border-slate-800 bg-slate-900 hover:border-purple-500 hover:bg-slate-800 transition-colors text-left overflow-hidden"
+                        className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] transition-colors text-left overflow-hidden"
                       >
-                        <div className="aspect-[3/4] bg-gradient-to-br from-purple-700/40 to-blue-600/30 flex items-center justify-center text-white text-xs font-semibold">
+                        <div className="aspect-[3/4] bg-gradient-to-br from-[var(--accent)]/40 to-blue-500/40 flex items-center justify-center text-[var(--text)] text-xs font-semibold">
                           {pl.items?.[0]?.title ? pl.items[0].title.charAt(0) : 'P'}
                         </div>
                         <div className="p-2">
-                          <div className="text-sm font-semibold text-white truncate">{pl.title}</div>
-                          <div className="text-[11px] text-slate-500 truncate">{pl.items?.length || 0} games</div>
+                          <div className="text-sm font-semibold text-[var(--text)] truncate">{pl.title}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
                         </div>
                       </button>
                     ))}
-                    {playlists.length === 0 && <div className="text-sm text-slate-500 col-span-full">No playlists yet.</div>}
+                    {playlists.length === 0 && <div className="text-sm text-[var(--text-muted)] col-span-full">No playlists yet.</div>}
                   </div>
                 </div>
 
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3">
-                  <div className="text-sm font-semibold text-white mb-2">Create Playlist</div>
+                <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-3">
+                  <div className="text-sm font-semibold text-[var(--text)] mb-2">Create Playlist</div>
                   <form onSubmit={handleCreatePlaylist} className="space-y-3">
                     <input
                       type="text"
                       value={playlistForm.title}
                       onChange={(e) => setPlaylistForm({ ...playlistForm, title: e.target.value })}
                       placeholder="Playlist title"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white"
+                      className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]"
                       required
                     />
                     <textarea
                       value={playlistForm.description}
                       onChange={(e) => setPlaylistForm({ ...playlistForm, description: e.target.value })}
                       placeholder="Description"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white h-20"
+                      className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] h-20"
                     />
-                    <div className="text-xs uppercase text-slate-500">Search games to add</div>
+                    <div className="text-xs uppercase text-[var(--text-muted)]">Search games to add</div>
                     <form onSubmit={handlePlaylistSearch} className="flex gap-2">
                       <input
                         type="text"
                         value={playlistSearchQuery}
                         onChange={(e) => setPlaylistSearchQuery(e.target.value)}
                         placeholder="Search database..."
-                        className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white"
+                        className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]"
                       />
-                      <button type="submit" disabled={isSearchingPlaylistGames} className="px-3 py-2 bg-purple-600 rounded text-white text-sm disabled:opacity-60">
+                      <button type="submit" disabled={isSearchingPlaylistGames} className="px-3 py-2 bg-[var(--accent)] rounded text-white text-sm disabled:opacity-60">
                         {isSearchingPlaylistGames ? 'Searching...' : 'Search'}
                       </button>
                     </form>
-                    {playlistSearchError && <div className="text-xs text-red-300 bg-red-900/30 border border-red-800 rounded p-2">{playlistSearchError}</div>}
+                    {playlistSearchError && <div className="text-xs text-red-600 bg-red-100 border border-red-200 rounded p-2">{playlistSearchError}</div>}
 
-                    <div className="text-xs uppercase text-slate-500 pt-2">Select games</div>
-                    <div className="max-h-64 overflow-y-auto border border-slate-800 rounded-lg p-2 custom-scrollbar space-y-1">
+                    <div className="text-xs uppercase text-[var(--text-muted)] pt-2">Select games</div>
+                    <div className="max-h-64 overflow-y-auto border border-[var(--border)] rounded-lg p-2 custom-scrollbar space-y-1 bg-[var(--panel)]">
                       {[...Object.values(data.games).map(g => ({ ...g, source: 'board', pid: g.id })), ...playlistSearchResults.map(r => ({
                         pid: `ext-${r.id}`,
                         title: r.name,
@@ -1231,7 +1343,7 @@ export default function App() {
                         cover: r.background_image,
                         source: 'search'
                       }))].map(item => (
-                        <label key={item.pid} className="flex items-center gap-2 text-sm text-slate-300 bg-slate-900 rounded px-2 py-1 hover:bg-slate-800">
+                        <label key={item.pid} className="flex items-center gap-2 text-sm text-[var(--text)] bg-[var(--panel-muted)] rounded px-2 py-1 hover:bg-[var(--panel-strong)]">
                           <input
                             type="checkbox"
                             checked={!!playlistForm.items[item.pid]}
@@ -1239,13 +1351,13 @@ export default function App() {
                             className="accent-purple-600"
                           />
                           <span className="truncate">{item.title}</span>
-                          <span className="text-[11px] text-slate-500 truncate">{item.platform}</span>
-                          {item.source === 'board' && <span className="text-[10px] text-green-400 border border-green-700 px-1 rounded">On board</span>}
+                          <span className="text-[11px] text-[var(--text-muted)] truncate">{item.platform}</span>
+                          {item.source === 'board' && <span className="text-[10px] text-green-600 border border-green-500 px-1 rounded bg-green-50 dark:bg-green-900/40">On board</span>}
                         </label>
                       ))}
-                      {[...Object.values(data.games), ...playlistSearchResults].length === 0 && <div className="text-xs text-slate-600">No games available.</div>}
+                      {[...Object.values(data.games), ...playlistSearchResults].length === 0 && <div className="text-xs text-[var(--text-muted)]">No games available.</div>}
                     </div>
-                    <button type="submit" disabled={isSavingPlaylist} className="w-full bg-purple-600 hover:bg-purple-500 text-white rounded p-2 font-semibold disabled:opacity-60">
+                    <button type="submit" disabled={isSavingPlaylist} className="w-full bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white rounded p-2 font-semibold disabled:opacity-60">
                       {isSavingPlaylist ? 'Saving...' : 'Save Playlist'}
                     </button>
                   </form>
@@ -1304,14 +1416,14 @@ export default function App() {
       <Modal isOpen={isColumnModalOpen} onClose={() => setIsColumnModalOpen(false)} title={isEditingColumn ? "Edit List" : "Create New List"}>
         <form onSubmit={handleSaveColumn} className="space-y-6">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">List Title</label>
-            <input autoFocus type="text" value={columnForm.title} onChange={(e) => setColumnForm({ ...columnForm, title: e.target.value })} placeholder="e.g. Wishlist" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" />
+            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">List Title</label>
+            <input autoFocus type="text" value={columnForm.title} onChange={(e) => setColumnForm({ ...columnForm, title: e.target.value })} placeholder="e.g. Wishlist" className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--text)] focus:border-[var(--accent)] outline-none placeholder:text-[var(--text-muted)]" />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Choose Icon</label>
+            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Choose Icon</label>
             <div className="grid grid-cols-6 gap-2">
               {Object.keys(COLUMN_ICONS).map(iconKey => (
-                <button key={iconKey} type="button" onClick={() => setColumnForm({ ...columnForm, icon: iconKey })} className={`aspect-square flex items-center justify-center rounded-lg transition-all ${columnForm.icon === iconKey ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                <button key={iconKey} type="button" onClick={() => setColumnForm({ ...columnForm, icon: iconKey })} className={`aspect-square flex items-center justify-center rounded-lg transition-all border ${columnForm.icon === iconKey ? 'bg-[var(--accent)] text-white shadow-lg border-[var(--accent)]' : 'bg-[var(--panel-muted)] text-[var(--text-muted)] border-[var(--border)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]'}`}>
                   <IconRenderer iconName={iconKey} size={20} />
                 </button>
               ))}
@@ -1319,10 +1431,10 @@ export default function App() {
           </div>
 
           {isEditingColumn && (
-            <div className="space-y-3 p-3 border border-slate-800 rounded-lg bg-slate-900/40">
-              <div className="text-sm font-semibold text-slate-200">When deleting this list</div>
+            <div className="space-y-3 p-3 border border-[var(--border)] rounded-lg bg-[var(--panel-muted)]">
+              <div className="text-sm font-semibold text-[var(--text)]">When deleting this list</div>
               <div className="space-y-2">
-                <label className="flex items-center gap-2 text-slate-300 text-sm">
+                <label className="flex items-center gap-2 text-[var(--text)] text-sm">
                   <input
                     type="radio"
                     name="deleteMode"
@@ -1338,14 +1450,14 @@ export default function App() {
                     value={deleteTarget}
                     onChange={(e) => setDeleteTarget(e.target.value)}
                     disabled={data.columnOrder.filter(id => id !== columnForm.id).length === 0}
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white disabled:opacity-50"
+                    className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] disabled:opacity-50"
                   >
                     {data.columnOrder.filter(id => id !== columnForm.id).map(colId => (
                       <option key={colId} value={colId}>{data.columns[colId].title}</option>
                     ))}
                   </select>
                 </div>
-                <label className="flex items-center gap-2 text-slate-300 text-sm">
+                <label className="flex items-center gap-2 text-[var(--text)] text-sm">
                   <input
                     type="radio"
                     name="deleteMode"
@@ -1356,12 +1468,12 @@ export default function App() {
                   />
                   Delete games along with this list
                 </label>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-[var(--text-muted)]">
                   {data.columns[columnForm.id]?.itemIds?.length || 0} games currently in this list.
                 </div>
               </div>
               <div className="flex justify-end">
-                <button type="button" onClick={handleDeleteColumn} className="px-3 py-2 bg-red-900/30 text-red-300 rounded border border-red-800 hover:bg-red-900/50">
+                <button type="button" onClick={handleDeleteColumn} className="px-3 py-2 bg-red-100 text-red-700 rounded border border-red-200 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800 dark:hover:bg-red-900/50">
                   Delete List
                 </button>
               </div>
@@ -1369,13 +1481,13 @@ export default function App() {
           )}
 
           <div className="pt-2 flex gap-3">
-            <button type="button" onClick={() => setIsColumnModalOpen(false)} className="flex-1 px-4 py-2 text-slate-400 hover:bg-slate-800 rounded-lg">Cancel</button>
-            <button type="submit" className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg">{isEditingColumn ? "Save Changes" : "Create List"}</button>
+            <button type="button" onClick={() => setIsColumnModalOpen(false)} className="flex-1 px-4 py-2 text-[var(--text-muted)] hover:bg-[var(--panel-muted)] rounded-lg">Cancel</button>
+            <button type="submit" className="flex-1 px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg">{isEditingColumn ? "Save Changes" : "Create List"}</button>
           </div>
         </form>
       </Modal>
 
-      <style>{` .custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 20px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #475569; } `}</style>
+      <style>{` .custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 20px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: var(--text-muted); } `}</style>
     </div>
   );
 }
