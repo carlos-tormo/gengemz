@@ -107,6 +107,8 @@ export default function App() {
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
   const [theme, setTheme] = useState('dark');
+  const myPlaylists = playlists.filter(pl => pl.ownerUid === user?.uid);
+  const publicBrowsePlaylists = playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private');
 
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
@@ -132,6 +134,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (selectedPlaylist && selectedPlaylist.ownerUid !== user?.uid && selectedPlaylist.privacy === 'private') {
+      setSelectedPlaylist(null);
+      setIsPlaylistDetailOpen(false);
+    }
+  }, [selectedPlaylist, user]);
+
+  useEffect(() => {
     try {
       localStorage.setItem('ggz-theme', theme);
     } catch (err) {
@@ -152,10 +161,11 @@ export default function App() {
     const unsub = onSnapshot(collection(db, 'artifacts', APP_ID, 'playlists'), (snap) => {
       const list = [];
       snap.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setPlaylists(list);
-    }, (err) => console.error("Playlists load failed", err));
+      const data = docSnap.data();
+      list.push({ id: docSnap.id, ...data, ownerUid: data.ownerUid || 'unknown' });
+    });
+    setPlaylists(list);
+  }, (err) => console.error("Playlists load failed", err));
     return () => unsub();
   }, []);
 
@@ -494,7 +504,7 @@ export default function App() {
 
   const createPlaceholderPlaylist = async () => {
     const baseName = 'New Playlist';
-    const suffix = playlists.reduce((max, pl) => {
+    const suffix = myPlaylists.reduce((max, pl) => {
       const m = pl.title && pl.title.match(/^New Playlist(?: \((\d+)\))?$/);
       if (!m) return max;
       const num = m[1] ? parseInt(m[1], 10) : 1;
@@ -1257,10 +1267,10 @@ export default function App() {
               </button>
             </div>
             <div className="flex-1 space-y-1 pr-1">
-              {playlists.length === 0 && (
+              {myPlaylists.length === 0 && (
                 <div className="text-xs text-[var(--text-muted)] px-2 py-2">No playlists yet.</div>
               )}
-              {playlists.map(pl => (
+              {myPlaylists.map(pl => (
                 <div key={pl.id} className="relative">
                   <button
                     onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setOpenPlaylistMenuId(null); }}
@@ -1300,10 +1310,10 @@ export default function App() {
 
           {/* Right content */}
           <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-4 flex flex-col gap-4">
-            {isPlaylistDetailOpen && selectedPlaylist ? (
-              <div className="flex flex-col gap-4 h-full">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
+              {isPlaylistDetailOpen && selectedPlaylist ? (
+                <div className="flex flex-col gap-4 h-full">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
                     <div className="text-xl font-bold text-[var(--text)]">{selectedPlaylist.title}</div>
                     {selectedPlaylist.description ? (
                       <div className="text-sm text-[var(--text-muted)]">{selectedPlaylist.description}</div>
@@ -1388,9 +1398,7 @@ export default function App() {
         contentClassName="max-w-5xl w-full"
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {playlists
-            .filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private')
-            .map(pl => (
+          {publicBrowsePlaylists.map(pl => (
             <button
               key={pl.id}
               onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setIsBrowsePlaylistsModalOpen(false); setIsPlaylistsModalOpen(true); }}
@@ -1405,7 +1413,7 @@ export default function App() {
               </div>
             </button>
           ))}
-          {playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private').length === 0 && (
+          {publicBrowsePlaylists.length === 0 && (
             <div className="text-sm text-[var(--text-muted)] col-span-full">There are no public playlists available at the moment.</div>
           )}
         </div>
