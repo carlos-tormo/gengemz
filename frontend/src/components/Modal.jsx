@@ -18,7 +18,7 @@ const Modal = ({
           <h3 className="text-lg font-bold text-[var(--text)]">{title}</h3>
           {!preventClose && <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"><X size={20} /></button>}
         </div>
-        <div className="p-4 overflow-y-auto overflow-x-hidden custom-scrollbar">{children}</div>
+        <div className="p-4 overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[calc(100vh-120px)] min-h-[60vh]">{children}</div>
       </div>
     </div>
   );

@@ -95,8 +95,8 @@ export default function App() {
   const [playlists, setPlaylists] = useState([]);
   const [isPlaylistsModalOpen, setIsPlaylistsModalOpen] = useState(false);
   const [isPlaylistDetailOpen, setIsPlaylistDetailOpen] = useState(false);
+  const [isBrowsePlaylistsModalOpen, setIsBrowsePlaylistsModalOpen] = useState(false);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
-  const [playlistForm, setPlaylistForm] = useState({ title: '', description: '', items: {} });
   const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
   const [playlistSearchResults, setPlaylistSearchResults] = useState([]);
@@ -105,6 +105,7 @@ export default function App() {
   const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
   const [duplicateTarget, setDuplicateTarget] = useState('');
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
   const [theme, setTheme] = useState('dark');
 
   // New User Settings State
@@ -365,7 +366,7 @@ export default function App() {
   };
 
   const handlePlaylistSearch = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!playlistSearchQuery.trim()) {
       setPlaylistSearchResults([]);
       return;
@@ -382,6 +383,46 @@ export default function App() {
       setPlaylistSearchError("Search failed. Try again.");
     } finally {
       setIsSearchingPlaylistGames(false);
+    }
+  };
+
+  const updatePlaylistFields = async (playlistId, fields) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', APP_ID, 'playlists', playlistId), { ...fields, updatedAt: serverTimestamp() });
+      if (selectedPlaylist?.id === playlistId) {
+        setSelectedPlaylist(prev => prev ? { ...prev, ...fields } : prev);
+      }
+    } catch (err) {
+      alert(err.message || "Failed to update playlist");
+    }
+  };
+
+  const handleRenamePlaylist = async (pl) => {
+    const newTitle = prompt("Edit playlist name", pl.title || '');
+    if (!newTitle || !newTitle.trim()) return;
+    await updatePlaylistFields(pl.id, { title: newTitle.trim() });
+    setOpenPlaylistMenuId(null);
+  };
+
+  const handleUpdateDescription = async (pl) => {
+    const newDesc = prompt("Playlist description", pl.description || '');
+    if (newDesc === null) return;
+    await updatePlaylistFields(pl.id, { description: newDesc });
+  };
+
+  const handleDeletePlaylist = async (pl) => {
+    const confirmDelete = confirm(`Delete playlist "${pl.title}"?`);
+    if (!confirmDelete) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', APP_ID, 'playlists', pl.id));
+      if (selectedPlaylist?.id === pl.id) {
+        setSelectedPlaylist(null);
+        setIsPlaylistDetailOpen(false);
+      }
+    } catch (err) {
+      alert(err.message || "Failed to delete playlist");
+    } finally {
+      setOpenPlaylistMenuId(null);
     }
   };
 
@@ -451,48 +492,43 @@ export default function App() {
     }
   };
 
-  const handleCreatePlaylist = async (e) => {
-    e.preventDefault();
-    if (!playlistForm.title.trim()) return;
-    const selectedIds = Object.keys(playlistForm.items).filter(id => playlistForm.items[id]);
-    if (selectedIds.length === 0) {
-      alert("Select at least one game to add.");
-      return;
-    }
+  const createPlaceholderPlaylist = async () => {
+    const baseName = 'New Playlist';
+    const suffix = playlists.reduce((max, pl) => {
+      const m = pl.title && pl.title.match(/^New Playlist(?: \((\d+)\))?$/);
+      if (!m) return max;
+      const num = m[1] ? parseInt(m[1], 10) : 1;
+      return Number.isNaN(num) ? max : Math.max(max, num);
+    }, 0);
+    const nextIndex = suffix ? suffix + 1 : 1;
+    const title = nextIndex === 1 ? baseName : `${baseName} (${nextIndex})`;
     setIsSavingPlaylist(true);
     try {
-      const items = selectedIds.map(id => {
-        const source = data.games[id] || playlistSearchResults.find(r => `ext-${r.id}` === id);
-        if (!source) return null;
-        return {
-          title: source.title || source.name,
-          platform: source.platform || (source.platforms ? source.platforms.map(p => p.platform.name).slice(0,2).join(', ') : ''),
-          genre: source.genre || source.genres?.[0]?.name || '',
-          year: source.year || (source.released?.split('-')[0] || ''),
-          cover: source.cover || source.background_image,
-          coverIndex: source.coverIndex || 0,
-          rating: source.rating || 0,
-          isFavorite: source.isFavorite || false,
-          originId: source.id,
-          sourceType: data.games[id] ? 'board' : 'search'
-        };
-      }).filter(Boolean);
-      await addDoc(collection(db, 'artifacts', APP_ID, 'playlists'), {
-        title: playlistForm.title,
-        description: playlistForm.description || '',
+      const payload = {
+        title,
+        description: '',
         ownerUid: user?.uid || 'anon',
         ownerName: user?.displayName || 'Guest',
-        items,
+        privacy: 'public',
+        items: [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      setPlaylistForm({ title: '', description: '', items: {} });
-      setIsPlaylistsModalOpen(false);
+      };
+      const ref = await addDoc(collection(db, 'artifacts', APP_ID, 'playlists'), payload);
+      setSelectedPlaylist({ id: ref.id, ...payload });
+      setIsPlaylistDetailOpen(true);
+      setOpenPlaylistMenuId(null);
     } catch (err) {
-      alert(err.message || "Failed to save playlist");
+      alert(err.message || "Failed to create playlist");
     } finally {
       setIsSavingPlaylist(false);
     }
+  };
+
+  const handleTogglePrivacy = async (pl) => {
+    const nextPrivacy = pl.privacy === 'private' ? 'public' : 'private';
+    await updatePlaylistFields(pl.id, { privacy: nextPrivacy });
+    setOpenPlaylistMenuId(null);
   };
 
   const searchGames = async (e) => { e.preventDefault(); if (!searchQuery.trim()) return; setIsSearching(true); setSearchError(null); setSearchResults([]); try { const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(searchQuery)}`); if (!res.ok) throw new Error(); const d = await res.json(); setSearchResults(d.results || []); } catch { setSearchError("Failed."); } finally { setIsSearching(false); } };
@@ -1206,211 +1242,173 @@ export default function App() {
         isOpen={isPlaylistsModalOpen}
         onClose={() => setIsPlaylistsModalOpen(false)}
         title=""
-        contentClassName="max-w-6xl w-full h-[80vh]"
+        contentClassName="max-w-6xl w-full h-[80vh] max-h-[90vh]"
       >
-        <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6 h-full">
+        <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6 h-full min-h-0">
           {/* Left rail */}
-          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3 h-full">
-            <div className="text-sm font-semibold text-[var(--text)] px-2">Your Playlists</div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3 h-full min-h-0">
+            <div className="flex items-center justify-between px-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Your Playlists</div>
+              <button
+                onClick={() => setIsBrowsePlaylistsModalOpen(true)}
+                className="text-[11px] px-2 py-1 rounded bg-[var(--panel-muted)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]"
+              >
+                Browse
+              </button>
+            </div>
+            <div className="flex-1 space-y-1 pr-1">
               {playlists.length === 0 && (
                 <div className="text-xs text-[var(--text-muted)] px-2 py-2">No playlists yet.</div>
               )}
               {playlists.map(pl => (
-                <button
-                  key={pl.id}
-                  onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg border ${selectedPlaylist?.id === pl.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel-strong)]' } transition-colors`}
-                >
-                  <div className="text-sm font-semibold truncate">{pl.title}</div>
-                  <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
-                </button>
+                <div key={pl.id} className="relative">
+                  <button
+                    onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setOpenPlaylistMenuId(null); }}
+                    className={`w-full text-left px-3 py-2 rounded-lg border pr-10 ${selectedPlaylist?.id === pl.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel-strong)]' } transition-colors`}
+                  >
+                    <div className="text-sm font-semibold truncate">{pl.title}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setOpenPlaylistMenuId(openPlaylistMenuId === pl.id ? null : pl.id); }}
+                    className="absolute right-1 top-1 p-1 rounded hover:bg-[var(--panel)] text-[var(--text-muted)]"
+                    title="Playlist options"
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                  {openPlaylistMenuId === pl.id && (
+                    <div className="absolute right-0 mt-1 w-36 bg-[var(--panel)] border border-[var(--border)] rounded-lg shadow-lg z-50 overflow-hidden">
+                      <button onClick={() => handleRenamePlaylist(pl)} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]">Edit name</button>
+                      <button onClick={() => handleUpdateDescription(pl)} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]">Edit description</button>
+                      <button onClick={() => handleTogglePrivacy(pl)} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]">
+                        {pl.privacy === 'private' ? 'Make public' : 'Make private'}
+                      </button>
+                      <button onClick={() => handleDeletePlaylist(pl)} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40">Delete</button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
             <button
-              onClick={() => { setIsPlaylistDetailOpen(false); }}
-              className="w-full px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold"
+              onClick={createPlaceholderPlaylist}
+              disabled={isSavingPlaylist}
+              className="w-full px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold disabled:opacity-60"
             >
-              Create New
+              {isSavingPlaylist ? 'Creating...' : 'Create Playlist'}
             </button>
           </div>
 
           {/* Right content */}
           <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-4 flex flex-col gap-4">
-            {/* If a playlist is selected, show grid; else show create form */}
             {isPlaylistDetailOpen && selectedPlaylist ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-lg font-bold text-[var(--text)]">{selectedPlaylist.title}</div>
-                    <div className="text-sm text-[var(--text-muted)]">{selectedPlaylist.description || 'No description'}</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">By {selectedPlaylist.ownerName || 'Unknown'}</div>
+              <div className="flex flex-col gap-4 h-full">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-xl font-bold text-[var(--text)]">{selectedPlaylist.title}</div>
+                    {selectedPlaylist.description ? (
+                      <div className="text-sm text-[var(--text-muted)]">{selectedPlaylist.description}</div>
+                    ) : (
+                      <button
+                        onClick={() => handleUpdateDescription(selectedPlaylist)}
+                        className="flex items-center gap-1 text-sm italic text-[var(--text-muted)] opacity-70 hover:opacity-100"
+                      >
+                        Add your description here (optional)
+                        <Pencil size={14} className="text-[var(--text-muted)]" />
+                      </button>
+                    )}
+                    <div className="text-xs text-[var(--text-muted)]">By {selectedPlaylist.ownerName || 'Unknown'}</div>
                   </div>
-                  <div className="text-[11px] text-[var(--text-muted)]">{selectedPlaylist.items?.length || 0} games</div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`text-[10px] px-2 py-1 rounded-full border ${selectedPlaylist.privacy === 'private' ? 'border-red-400 text-red-500 dark:text-red-300 dark:border-red-600' : 'border-green-400 text-green-700 dark:text-green-300 dark:border-green-600'}`}>
+                      {selectedPlaylist.privacy === 'private' ? 'Private' : 'Public'}
+                    </span>
+                    <div className="text-xs text-[var(--text-muted)]">{selectedPlaylist.items?.length || 0} games</div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar">
-                  {(selectedPlaylist.items || []).map((item, idx) => {
-                    const exists = isGameOnBoard(data, item);
-                    return (
-                      <div key={`${item.title}-${idx}`} className={`rounded-lg border ${exists ? 'border-green-600 bg-green-100 dark:bg-green-900/15' : 'border-[var(--border)] bg-[var(--panel-muted)]'} overflow-hidden`}>
-                        <div className="aspect-[3/4] bg-slate-800 bg-cover bg-center" style={{ background: item.cover ? `url(${item.cover}) center/cover` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
-                        <div className="p-2 space-y-1">
-                          <div className="text-sm font-semibold text-[var(--text)] truncate">{item.title}</div>
-                          <div className="text-[11px] text-[var(--text-muted)] truncate">{item.platform} · {item.genre}</div>
-                          <div className="flex items-center gap-1">
-                            <select
-                              onChange={(e) => addPlaylistItemToList(item, e.target.value)}
-                              defaultValue=""
-                              className="w-full bg-[var(--panel)] border border-[var(--border)] text-[11px] text-[var(--text)] rounded px-2 py-1"
-                            >
-                              <option value="" disabled>Add to list</option>
-                              {data.columnOrder.map(cid => (
-                                <option key={cid} value={cid}>{data.columns[cid].title}</option>
-                              ))}
-                            </select>
+
+                <div className="border border-[var(--border)] rounded-lg overflow-hidden flex-1 bg-[var(--panel-muted)]">
+                  <div className="grid grid-cols-[32px_44px_1fr_1fr_140px] px-4 py-2 text-[11px] uppercase text-[var(--text-muted)] border-b border-[var(--border)]">
+                    <span>#</span>
+                    <span>Cover</span>
+                    <span>Title</span>
+                    <span>Platform · Genre</span>
+                    <span className="text-right">Actions</span>
+                  </div>
+                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar divide-y divide-[var(--border)]">
+                    {(selectedPlaylist.items || []).map((item, idx) => {
+                      const exists = isGameOnBoard(data, item);
+                      return (
+                        <div key={`${item.title}-${idx}`} className="grid grid-cols-[32px_44px_1fr_1fr_140px] items-center px-4 py-3 gap-2">
+                          <span className="text-xs text-[var(--text-muted)]">{idx + 1}</span>
+                          <div className="w-10 h-10 rounded bg-[var(--panel)] border border-[var(--border)] overflow-hidden" style={{ backgroundImage: item.cover ? `url(${item.cover})` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-[var(--text)] truncate">{item.title}</div>
+                            <div className="text-[11px] text-[var(--text-muted)] truncate">{item.year ? `${item.year} · ` : ''}{item.platform}</div>
+                          </div>
+                          <div className="text-xs text-[var(--text-muted)] truncate">{item.genre || '—'}</div>
+                          <div className="flex items-center gap-2 justify-end">
+                            {exists ? (
+                              <span className="text-[11px] px-2 py-1 rounded-full border border-green-400 text-green-700 dark:text-green-300 dark:border-green-600">On board</span>
+                            ) : (
+                              <select
+                                onChange={(e) => addPlaylistItemToList(item, e.target.value)}
+                                defaultValue=""
+                                className="bg-[var(--panel)] border border-[var(--border)] text-[11px] text-[var(--text)] rounded px-2 py-1"
+                              >
+                                <option value="" disabled>Add to list</option>
+                                {data.columnOrder.map(cid => (
+                                  <option key={cid} value={cid}>{data.columns[cid].title}</option>
+                                ))}
+                              </select>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  {(selectedPlaylist.items || []).length === 0 && <div className="text-sm text-slate-500 col-span-full">No games in this playlist.</div>}
-                </div>
-              </>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-                <div className="space-y-3">
-                  <div className="text-lg font-bold text-[var(--text)]">Browse public playlists</div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto custom-scrollbar">
-                    {playlists.map(pl => (
-                      <button
-                        key={pl.id}
-                        onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); }}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] transition-colors text-left overflow-hidden"
-                      >
-                        <div className="aspect-[3/4] bg-gradient-to-br from-[var(--accent)]/40 to-blue-500/40 flex items-center justify-center text-[var(--text)] text-xs font-semibold">
-                          {pl.items?.[0]?.title ? pl.items[0].title.charAt(0) : 'P'}
-                        </div>
-                        <div className="p-2">
-                          <div className="text-sm font-semibold text-[var(--text)] truncate">{pl.title}</div>
-                          <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
-                        </div>
-                      </button>
-                    ))}
-                    {playlists.length === 0 && <div className="text-sm text-[var(--text-muted)] col-span-full">No playlists yet.</div>}
+                      );
+                    })}
+                    {(selectedPlaylist.items || []).length === 0 && (
+                      <div className="px-4 py-8 text-sm text-[var(--text-muted)]">This playlist is empty.</div>
+                    )}
                   </div>
                 </div>
-
-                <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-3">
-                  <div className="text-sm font-semibold text-[var(--text)] mb-2">Create Playlist</div>
-                  <form onSubmit={handleCreatePlaylist} className="space-y-3">
-                    <input
-                      type="text"
-                      value={playlistForm.title}
-                      onChange={(e) => setPlaylistForm({ ...playlistForm, title: e.target.value })}
-                      placeholder="Playlist title"
-                      className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]"
-                      required
-                    />
-                    <textarea
-                      value={playlistForm.description}
-                      onChange={(e) => setPlaylistForm({ ...playlistForm, description: e.target.value })}
-                      placeholder="Description"
-                      className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] h-20"
-                    />
-                    <div className="text-xs uppercase text-[var(--text-muted)]">Search games to add</div>
-                    <form onSubmit={handlePlaylistSearch} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={playlistSearchQuery}
-                        onChange={(e) => setPlaylistSearchQuery(e.target.value)}
-                        placeholder="Search database..."
-                        className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]"
-                      />
-                      <button type="submit" disabled={isSearchingPlaylistGames} className="px-3 py-2 bg-[var(--accent)] rounded text-white text-sm disabled:opacity-60">
-                        {isSearchingPlaylistGames ? 'Searching...' : 'Search'}
-                      </button>
-                    </form>
-                    {playlistSearchError && <div className="text-xs text-red-600 bg-red-100 border border-red-200 rounded p-2">{playlistSearchError}</div>}
-
-                    <div className="text-xs uppercase text-[var(--text-muted)] pt-2">Select games</div>
-                    <div className="max-h-64 overflow-y-auto border border-[var(--border)] rounded-lg p-2 custom-scrollbar space-y-1 bg-[var(--panel)]">
-                      {[...Object.values(data.games).map(g => ({ ...g, source: 'board', pid: g.id })), ...playlistSearchResults.map(r => ({
-                        pid: `ext-${r.id}`,
-                        title: r.name,
-                        platform: r.platforms ? r.platforms.map(p => p.platform.name).slice(0,2).join(', ') : 'Unknown',
-                        genre: r.genres?.[0]?.name || '',
-                        year: r.released?.split('-')[0] || '',
-                        cover: r.background_image,
-                        source: 'search'
-                      }))].map(item => (
-                        <label key={item.pid} className="flex items-center gap-2 text-sm text-[var(--text)] bg-[var(--panel-muted)] rounded px-2 py-1 hover:bg-[var(--panel-strong)]">
-                          <input
-                            type="checkbox"
-                            checked={!!playlistForm.items[item.pid]}
-                            onChange={(e) => setPlaylistForm(prev => ({ ...prev, items: { ...prev.items, [item.pid]: e.target.checked } }))}
-                            className="accent-purple-600"
-                          />
-                          <span className="truncate">{item.title}</span>
-                          <span className="text-[11px] text-[var(--text-muted)] truncate">{item.platform}</span>
-                          {item.source === 'board' && <span className="text-[10px] text-green-600 border border-green-500 px-1 rounded bg-green-50 dark:bg-green-900/40">On board</span>}
-                        </label>
-                      ))}
-                      {[...Object.values(data.games), ...playlistSearchResults].length === 0 && <div className="text-xs text-[var(--text-muted)]">No games available.</div>}
-                    </div>
-                    <button type="submit" disabled={isSavingPlaylist} className="w-full bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white rounded p-2 font-semibold disabled:opacity-60">
-                      {isSavingPlaylist ? 'Saving...' : 'Save Playlist'}
-                    </button>
-                  </form>
-                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                Select a playlist to preview. You can also browse or create one.
               </div>
             )}
           </div>
         </div>
       </Modal>
 
-      {/* Playlist Detail Modal */}
-      <Modal isOpen={isPlaylistDetailOpen} onClose={() => setIsPlaylistDetailOpen(false)} title={selectedPlaylist ? selectedPlaylist.title : 'Playlist'}>
-        {selectedPlaylist ? (
-          <div className="space-y-4">
-            <div className="text-sm text-slate-400">{selectedPlaylist.description || 'No description'}</div>
-            <div className="text-xs text-slate-500">By {selectedPlaylist.ownerName || 'Unknown'}</div>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar">
-              {(selectedPlaylist.items || []).map((item, idx) => {
-                const exists = isGameOnBoard(data, item);
-                return (
-                  <div key={`${item.title}-${idx}`} className={`flex items-center gap-3 p-3 rounded-lg border ${exists ? 'border-green-700 bg-green-900/20' : 'border-slate-800 bg-slate-900'}`}>
-                    <div className="w-12 h-16 rounded-md bg-slate-800 overflow-hidden bg-cover bg-center" style={{ background: item.cover ? `url(${item.cover}) center/cover` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-white truncate">{item.title}</div>
-                        {item.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{item.rating}/10</span>}
-                      </div>
-                      <div className="text-xs text-slate-500 truncate">{item.platform} · {item.genre}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        onChange={(e) => addPlaylistItemToList(item, e.target.value)}
-                        defaultValue=""
-                        className="bg-slate-900 border border-slate-700 text-xs text-white rounded px-2 py-1"
-                      >
-                        <option value="" disabled>Add to list</option>
-                        {data.columnOrder.map(cid => (
-                          <option key={cid} value={cid}>{data.columns[cid].title}</option>
-                        ))}
-                      </select>
-                      <button onClick={() => addPlaylistItemToList(item, data.columnOrder[0])} className="p-2 rounded-md bg-slate-800 text-slate-300 hover:text-white" title="Quick add">
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {(selectedPlaylist.items || []).length === 0 && <div className="text-sm text-slate-500">No games in this playlist.</div>}
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-slate-500">Select a playlist to view.</div>
-        )}
+      {/* Browse Public Playlists */}
+      <Modal
+        isOpen={isBrowsePlaylistsModalOpen}
+        onClose={() => setIsBrowsePlaylistsModalOpen(false)}
+        title="Browse public playlists"
+        contentClassName="max-w-5xl w-full"
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {playlists
+            .filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private')
+            .map(pl => (
+            <button
+              key={pl.id}
+              onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setIsBrowsePlaylistsModalOpen(false); setIsPlaylistsModalOpen(true); }}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] transition-colors text-left overflow-hidden"
+            >
+              <div className="aspect-[3/4] bg-gradient-to-br from-[var(--accent)]/40 to-blue-500/40 flex items-center justify-center text-[var(--text)] text-xs font-semibold">
+                {pl.items?.[0]?.title ? pl.items[0].title.charAt(0) : 'P'}
+              </div>
+              <div className="p-2">
+                <div className="text-sm font-semibold text-[var(--text)] truncate">{pl.title}</div>
+                <div className="text-[11px] text-[var(--text-muted)] truncate">{pl.items?.length || 0} games</div>
+              </div>
+            </button>
+          ))}
+          {playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private').length === 0 && (
+            <div className="text-sm text-[var(--text-muted)] col-span-full">There are no public playlists available at the moment.</div>
+          )}
+        </div>
       </Modal>
 
       <Modal isOpen={isColumnModalOpen} onClose={() => setIsColumnModalOpen(false)} title={isEditingColumn ? "Edit List" : "Create New List"}>
