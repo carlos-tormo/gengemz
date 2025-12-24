@@ -30,6 +30,8 @@ import GridGameCard from './components/GridGameCard';
 import Column from './components/Column';
 import UserMenu from './components/UserMenu';
 import LandingPage from './components/LandingPage';
+import logoWordmarkLight from './assets/logo-wordmark-light.svg';
+import logoWordmarkDark from './assets/logo-wordmark-dark.svg';
 
 // Hooks
 import useClickOutside from './hooks/useClickOutside';
@@ -109,6 +111,14 @@ export default function App() {
   const [theme, setTheme] = useState('dark');
   const myPlaylists = playlists.filter(pl => pl.ownerUid === user?.uid);
   const publicBrowsePlaylists = playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private');
+  const [isBrowseGamesModalOpen, setIsBrowseGamesModalOpen] = useState(false);
+  const [browseGamesResults, setBrowseGamesResults] = useState([]);
+  const [browseFilters, setBrowseFilters] = useState({ ordering: '-metacritic', page_size: 50, platformId: '', startDate: '', endDate: '' });
+  const [isBrowsingGames, setIsBrowsingGames] = useState(false);
+  const [browseGamesError, setBrowseGamesError] = useState(null);
+  const [browseMenuGameId, setBrowseMenuGameId] = useState(null);
+  const [browseMenuPos, setBrowseMenuPos] = useState(null);
+  const [browseMenuGame, setBrowseMenuGame] = useState(null);
 
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
@@ -161,13 +171,20 @@ export default function App() {
     const unsub = onSnapshot(collection(db, 'artifacts', APP_ID, 'playlists'), (snap) => {
       const list = [];
       snap.forEach(docSnap => {
-      const data = docSnap.data();
-      list.push({ id: docSnap.id, ...data, ownerUid: data.ownerUid || 'unknown' });
-    });
+        const data = docSnap.data();
+        list.push({ id: docSnap.id, ...data, ownerUid: data.ownerUid || 'unknown' });
+      });
     setPlaylists(list);
   }, (err) => console.error("Playlists load failed", err));
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (isPlaylistsModalOpen && myPlaylists.length > 0 && !selectedPlaylist) {
+      setSelectedPlaylist(myPlaylists[0]);
+      setIsPlaylistDetailOpen(true);
+    }
+  }, [isPlaylistsModalOpen, myPlaylists, selectedPlaylist]);
 
   // Default delete options when opening the column modal
   useEffect(() => {
@@ -375,25 +392,51 @@ export default function App() {
     }
   };
 
+  const normalizeQuery = (q) => q.toLowerCase().trim().replace(/\s+/g, ' ');
+  const generateQueryVariants = (q) => {
+    const base = normalizeQuery(q);
+    const variants = [base];
+    const spaced = base.replace(/([a-zA-Z])([0-9])/g, '$1 $2').replace(/([0-9])([a-zA-Z])/g, '$1 $2');
+    if (spaced !== base) variants.push(spaced);
+    return [...new Set(variants.filter(Boolean))];
+  };
+
+  const fetchGamesWithVariants = async (rawQuery, { onResults, onError, setLoading, fallbackQuery }) => {
+    const variants = rawQuery.trim() ? generateQueryVariants(rawQuery) : [];
+    if (fallbackQuery) variants.push(fallbackQuery);
+    if (variants.length === 0) return;
+    setLoading(true);
+    if (onError) onError(null);
+    try {
+      for (const v of variants) {
+        const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(v)}`);
+        if (!res.ok) throw new Error("Search failed");
+        const d = await res.json();
+        if (d.results && d.results.length > 0) {
+          onResults(d.results);
+          return;
+        }
+      }
+      onResults([]);
+    } catch (err) {
+      console.error("Game search failed", err);
+      if (onError) onError("Search failed. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePlaylistSearch = async (e) => {
     if (e?.preventDefault) e.preventDefault();
     if (!playlistSearchQuery.trim()) {
       setPlaylistSearchResults([]);
       return;
     }
-    setIsSearchingPlaylistGames(true);
-    setPlaylistSearchError(null);
-    try {
-      const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(playlistSearchQuery)}`);
-      if (!res.ok) throw new Error("Search failed");
-      const d = await res.json();
-      setPlaylistSearchResults(d.results || []);
-    } catch (err) {
-      console.error("Playlist search failed", err);
-      setPlaylistSearchError("Search failed. Try again.");
-    } finally {
-      setIsSearchingPlaylistGames(false);
-    }
+    fetchGamesWithVariants(playlistSearchQuery, {
+      onResults: setPlaylistSearchResults,
+      onError: setPlaylistSearchError,
+      setLoading: setIsSearchingPlaylistGames,
+    });
   };
 
   const updatePlaylistFields = async (playlistId, fields) => {
@@ -471,6 +514,96 @@ export default function App() {
     }));
   };
 
+  const playlistItemFromGame = (game) => ({
+    title: game.title,
+    platform: game.platform,
+    genre: game.genre,
+    year: game.year,
+    cover: game.cover,
+    coverIndex: game.coverIndex || 0,
+    rating: game.rating || 0,
+    isFavorite: game.isFavorite || false,
+    originId: game.id,
+    sourceType: 'board'
+  });
+
+  const gameFromRaw = (raw) => ({
+    id: raw.id || `ext-${Date.now()}`,
+    title: raw.name,
+    platform: raw.platforms ? raw.platforms.map(p => p.platform.name).slice(0,2).join(', ') : 'Unknown',
+    genre: raw.genres?.[0]?.name || '',
+    year: raw.released?.split('-')[0] || '',
+    cover: raw.background_image,
+    coverIndex: 0,
+    rating: raw.rating || 0,
+    isFavorite: false
+  });
+
+  const handleBrowseListAction = (rawGame, targetColId) => {
+    const target = targetColId || data.columnOrder[0];
+    const gameData = gameFromRaw(rawGame);
+    const existingId = findExistingGameIdByTitle(data, gameData.title);
+    if (existingId) {
+      const currentCol = getGameColumnId(data, existingId);
+      if (currentCol === target) {
+        if (!confirm(`Remove "${gameData.title}" from ${data.columns[currentCol]?.title || 'this list'}?`)) return;
+        save(prev => {
+          const newCols = { ...prev.columns };
+          newCols[currentCol] = { ...newCols[currentCol], itemIds: newCols[currentCol].itemIds.filter(id => id !== existingId) };
+          const newGames = { ...prev.games };
+          delete newGames[existingId];
+          return { ...prev, columns: newCols, games: newGames };
+        });
+      } else {
+        save(prev => {
+          const newCols = { ...prev.columns };
+          newCols[currentCol] = { ...newCols[currentCol], itemIds: newCols[currentCol].itemIds.filter(id => id !== existingId) };
+          newCols[target] = { ...newCols[target], itemIds: [existingId, ...newCols[target].itemIds] };
+          return { ...prev, columns: newCols };
+        });
+      }
+    } else {
+      const newId = `g${Date.now()}`;
+      save(prev => ({
+        ...prev,
+        games: {
+          ...prev.games,
+          [newId]: { ...gameData, id: newId }
+        },
+        columns: {
+          ...prev.columns,
+          [target]: { ...prev.columns[target], itemIds: [newId, ...prev.columns[target].itemIds] }
+        }
+      }));
+    }
+    setBrowseMenuGameId(null);
+    setBrowseMenuGame(null);
+  };
+
+  const handleBrowsePlaylistAction = async (rawGame, pl) => {
+    if (!pl?.id) return;
+    const item = playlistItemFromGame(gameFromRaw(rawGame));
+    try {
+      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', pl.id);
+      const snap = await getDoc(plRef);
+      if (!snap.exists()) throw new Error("Playlist not found");
+      const current = snap.data().items || [];
+      const exists = current.find(it => it.originId === item.id || it.title?.toLowerCase() === item.title.toLowerCase());
+      if (exists) {
+        if (!confirm(`Remove "${item.title}" from ${pl.title}?`)) return;
+        const updated = current.filter(it => !(it.originId === exists.originId || it.title === exists.title));
+        await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
+      } else {
+        await updateDoc(plRef, { items: [...current, item], updatedAt: serverTimestamp() });
+      }
+    } catch (err) {
+      alert(err.message || "Failed to update playlist");
+    } finally {
+      setBrowseMenuGameId(null);
+      setBrowseMenuGame(null);
+    }
+  };
+
   const addGameToPlaylist = async (playlistId, game) => {
     if (!playlistId || !game) return;
     try {
@@ -483,18 +616,7 @@ export default function App() {
         alert("Game already in playlist");
         return;
       }
-      const newItem = {
-        title: game.title,
-        platform: game.platform,
-        genre: game.genre,
-        year: game.year,
-        cover: game.cover,
-        coverIndex: game.coverIndex || 0,
-        rating: game.rating || 0,
-        isFavorite: item.isFavorite || false,
-        originId: game.id,
-        sourceType: 'board'
-      };
+      const newItem = playlistItemFromGame(game);
       await updateDoc(plRef, { items: [...current, newItem], updatedAt: serverTimestamp() });
     } catch (err) {
       console.error("Add to playlist failed", err);
@@ -502,7 +624,7 @@ export default function App() {
     }
   };
 
-  const createPlaceholderPlaylist = async () => {
+  const createPlaceholderPlaylist = async (initialGame = null) => {
     const baseName = 'New Playlist';
     const suffix = myPlaylists.reduce((max, pl) => {
       const m = pl.title && pl.title.match(/^New Playlist(?: \((\d+)\))?$/);
@@ -520,14 +642,18 @@ export default function App() {
         ownerUid: user?.uid || 'anon',
         ownerName: user?.displayName || 'Guest',
         privacy: 'public',
-        items: [],
+        items: initialGame ? [playlistItemFromGame(initialGame)] : [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
       const ref = await addDoc(collection(db, 'artifacts', APP_ID, 'playlists'), payload);
-      setSelectedPlaylist({ id: ref.id, ...payload });
+      const newPlaylist = { id: ref.id, ...payload };
+      setSelectedPlaylist(newPlaylist);
       setIsPlaylistDetailOpen(true);
       setOpenPlaylistMenuId(null);
+      if (initialGame) {
+        await addGameToPlaylist(ref.id, initialGame);
+      }
     } catch (err) {
       alert(err.message || "Failed to create playlist");
     } finally {
@@ -541,7 +667,53 @@ export default function App() {
     setOpenPlaylistMenuId(null);
   };
 
-  const searchGames = async (e) => { e.preventDefault(); if (!searchQuery.trim()) return; setIsSearching(true); setSearchError(null); setSearchResults([]); try { const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(searchQuery)}`); if (!res.ok) throw new Error(); const d = await res.json(); setSearchResults(d.results || []); } catch { setSearchError("Failed."); } finally { setIsSearching(false); } };
+  const searchGames = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    if (!searchQuery.trim()) return;
+    await fetchGamesWithVariants(searchQuery, {
+      onResults: setSearchResults,
+      onError: setSearchError,
+      setLoading: setIsSearching,
+    });
+  };
+  const browseTopGames = async () => {
+    setIsBrowsingGames(true);
+    setBrowseGamesError(null);
+    setBrowseMenuGameId(null);
+    setBrowseMenuGame(null);
+    try {
+      const params = new URLSearchParams();
+      params.append('ordering', browseFilters.ordering || '-metacritic');
+      params.append('page_size', browseFilters.page_size || 50);
+      if (browseFilters.platformId) params.append('platforms', browseFilters.platformId);
+      const datesStr = [browseFilters.startDate, browseFilters.endDate].filter(v => v).join(',');
+      if (datesStr) params.append('dates', datesStr);
+      const res = await fetch(`${BACKEND_URL}?${params.toString()}`);
+      if (!res.ok) throw new Error("Browse failed");
+      const d = await res.json();
+      const now = new Date();
+      const deduped = [];
+      const seen = new Set();
+      (d.results || []).forEach(g => {
+        if (!g) return;
+        const key = g.slug || `${g.name || ''}-${g.released || ''}`;
+        if (seen.has(key)) return;
+        if (browseFilters.ordering === '-released' && g.released) {
+          const relDate = new Date(g.released);
+          if (relDate > now) return;
+        }
+        seen.add(key);
+        deduped.push(g);
+      });
+      setBrowseGamesResults(deduped);
+    } catch (err) {
+      console.error("Browse games failed", err);
+      setBrowseGamesError("Failed to load games.");
+      setBrowseGamesResults([]);
+    } finally {
+      setIsBrowsingGames(false);
+    }
+  };
   
   const handleAddGameFromSearch = (g) => { 
     const existingId = findExistingGameIdByTitle(data, g.name);
@@ -656,7 +828,7 @@ export default function App() {
   const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: `col-${Date.now()}`, title: '', icon: 'gamepad' }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
   const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad' }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
   
-  const handleSaveColumn = (e) => { 
+  const handleSaveColumn = (e) => {
     e.preventDefault(); if (!columnForm.title.trim()) return; 
     save(prev => {
       let nd = { ...prev }; 
@@ -709,14 +881,37 @@ export default function App() {
   return (
     <div className={`min-h-screen ${theme === 'light' ? 'theme-light' : 'theme-dark'} bg-[var(--bg)] text-[var(--text)] font-sans relative flex flex-col selection:bg-[var(--accent)] selection:text-[var(--panel)] transition-colors`}>
       <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 transition-opacity duration-300 ${saveStatus === 'idle' ? 'opacity-50 hover:opacity-100' : 'opacity-100'}`}>
-        <div className="text-[10px] text-slate-600 font-mono bg-slate-900/50 px-2 py-1 rounded">{user ? `ID: ${user.uid.slice(0, 6)}...` : 'No User'}</div>
-        <div className={`bg-slate-800 border ${saveStatus === 'error' ? 'border-red-500' : 'border-slate-700'} rounded-full px-4 py-2 flex items-center gap-2 shadow-xl`}>{saveStatus === 'saving' ? <><Loader2 size={16} className="animate-spin text-purple-400" /><span className="text-xs font-medium text-slate-300">Saving...</span></> : saveStatus === 'error' ? <><WifiOff size={16} className="text-red-400" /><span className="text-xs font-medium text-red-300">Sync Error</span></> : <><Check size={16} className="text-green-400" /><span className="text-xs font-medium text-slate-300">Saved</span></>}</div>
+        <div className="text-[10px] text-[var(--text-muted)] font-mono bg-[var(--panel)]/70 px-2 py-1 rounded border border-[var(--border)]">
+          {user ? `ID: ${user.uid.slice(0, 6)}...` : 'No User'}
+        </div>
+        <div className={`bg-[var(--panel)] border ${saveStatus === 'error' ? 'border-red-500' : 'border-[var(--border)]'} rounded-full px-4 py-2 flex items-center gap-2 shadow-xl`}>
+          {saveStatus === 'saving' ? (
+            <>
+              <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
+              <span className="text-xs font-medium text-[var(--text-muted)]">Saving...</span>
+            </>
+          ) : saveStatus === 'error' ? (
+            <>
+              <WifiOff size={16} className="text-red-500" />
+              <span className="text-xs font-medium text-red-500">Sync Error</span>
+            </>
+          ) : (
+            <>
+              <Check size={16} className="text-green-500" />
+              <span className="text-xs font-medium text-[var(--text-muted)]">Saved</span>
+            </>
+          )}
+        </div>
       </div>
 
       <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--glass)] backdrop-blur-md border-b border-[var(--border)] z-40 flex items-center justify-between px-4 md:px-8">
         <div className="flex items-center gap-3">
-          <div className="bg-gradient-to-br from-purple-600 to-blue-600 p-2 rounded-lg shadow-lg shadow-purple-500/20"><Gamepad2 size={24} className="text-white" /></div>
-          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden sm:block">Gengemz</h1>
+          <img
+            src={theme === 'light' ? logoWordmarkLight : logoWordmarkDark}
+            alt="Gengemz"
+            className="h-8 w-auto"
+          />
+          <span className="sr-only">Gengemz</span>
           {!showLanding && (
             <div className="hidden md:flex ml-8 relative group" ref={userSearchRef}>
               <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-purple-400" size={16} />
@@ -777,47 +972,56 @@ export default function App() {
              </button>
            )}
            {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
-           {!showLanding && !isDataLoading && !isFavoritesView && (
-             <button
-               onClick={() => setIsListView(!isListView)}
-               className={`p-2 rounded-full transition-colors ${isListView ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-               title={isListView ? "Grid view" : "List view"}
+          {!showLanding && !isDataLoading && !isFavoritesView && (
+            <button
+              onClick={() => setIsListView(!isListView)}
+              className={`p-2 rounded-full transition-colors ${isListView ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+              title={isListView ? "Grid view" : "List view"}
              >
                <List size={18} />
              </button>
            )}
-           {!showLanding && !isDataLoading && !isFavoritesView && (
-             <button
-               onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
-               className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-               title="Playlists"
-             >
-               <LayoutGrid size={18} />
-             </button>
-           )}
-           {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
-           {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
-        </div>
+          {!showLanding && !isDataLoading && !isFavoritesView && (
+            <button
+              onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
+              className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Playlists"
+            >
+              <LayoutGrid size={18} />
+            </button>
+          )}
+          {!isDataLoading && (
+            <button
+              onClick={() => { setIsBrowseGamesModalOpen(true); browseTopGames(); }}
+              className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Browse games"
+            >
+              <Search size={18} />
+            </button>
+          )}
+          {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
+          {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
+       </div>
       </nav>
 
       {/* Onboarding Modal (Forced Privacy Selection) */}
       <Modal isOpen={isOnboardingModalOpen} title="Welcome to Gengemz!" preventClose={true}>
         <div className="space-y-6">
-          <p className="text-slate-400 text-sm">To get started, please set up your profile privacy. You can change this later in Settings.</p>
+          <p className="text-[var(--text-muted)] text-sm">To get started, please set up your profile privacy. You can change this later in Settings.</p>
           <form onSubmit={handleOnboardingComplete} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Display Name</label>
+              <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Display Name</label>
               <input 
                 type="text" 
                 value={userSettings.displayName} 
                 onChange={(e) => setUserSettings({...userSettings, displayName: e.target.value})} 
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" 
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--text)] focus:border-[var(--accent)] outline-none placeholder:text-[var(--text-muted)]" 
                 placeholder="How should we call you?"
                 required
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Privacy Level</label>
+              <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Privacy Level</label>
               <div className="grid grid-cols-1 gap-2">
                 {[
                   { id: 'public', label: 'Public', icon: Users, desc: 'Anyone can find and view your profile.' },
@@ -827,32 +1031,193 @@ export default function App() {
                   <div 
                     key={opt.id}
                     onClick={() => setUserSettings({ ...userSettings, privacy: opt.id })}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${userSettings.privacy === opt.id ? 'bg-purple-600/10 border-purple-500 text-purple-200' : 'bg-slate-900 border-slate-800 hover:border-slate-600'}`}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${userSettings.privacy === opt.id ? 'bg-[var(--accent)]/10 border-[var(--accent)] text-[var(--text)]' : 'bg-[var(--panel-muted)] border-[var(--border)] hover:border-[var(--accent)]'}`}
                   >
-                    <div className={`p-2 rounded-full ${userSettings.privacy === opt.id ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                    <div className={`p-2 rounded-full ${userSettings.privacy === opt.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--panel)] text-[var(--text-muted)]'}`}>
                       <opt.icon size={18} />
                     </div>
                     <div>
                       <div className="font-bold text-sm">{opt.label}</div>
-                      <div className="text-xs opacity-70">{opt.desc}</div>
+                      <div className="text-xs text-[var(--text-muted)]">{opt.desc}</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-            <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg">Start Your Journey</button>
+            <button type="submit" className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg">Start Your Journey</button>
           </form>
         </div>
       </Modal>
 
+      {/* Browse Games Modal */}
+      <Modal
+        isOpen={isBrowseGamesModalOpen}
+        onClose={() => setIsBrowseGamesModalOpen(false)}
+        title="Browse games (RAWG.io)"
+        contentClassName="max-w-5xl w-full h-[80vh]"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--text-muted)]">Data sourced from RAWG.io. Results are limited to top-rated games.</p>
+          <div className="text-[11px] text-[var(--text-muted)]">Filters</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+            <div>
+              <label className="text-[11px] uppercase text-[var(--text-muted)]">Ordering</label>
+              <select
+                value={browseFilters.ordering}
+                onChange={(e) => setBrowseFilters(prev => ({ ...prev, ordering: e.target.value }))}
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
+              >
+                <option value="-metacritic">Top rated (metacritic)</option>
+                <option value="-rating">Top rated (user)</option>
+                <option value="-released">Newest</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-[var(--text-muted)]">Platform</label>
+              <select
+                value={browseFilters.platformId}
+                onChange={(e) => setBrowseFilters(prev => ({ ...prev, platformId: e.target.value }))}
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
+              >
+                <option value="">All platforms</option>
+                <option value="4">PC</option>
+                <option value="187">PlayStation 5</option>
+                <option value="18">PlayStation 4</option>
+                <option value="1">Xbox One</option>
+                <option value="186">Xbox Series X/S</option>
+                <option value="7">Nintendo Switch</option>
+                <option value="3">iOS</option>
+                <option value="21">Android</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-[var(--text-muted)]">Start date</label>
+              <input
+                type="date"
+                value={browseFilters.startDate}
+                onChange={(e) => setBrowseFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-[var(--text-muted)]">End date</label>
+              <input
+                type="date"
+                value={browseFilters.endDate}
+                onChange={(e) => setBrowseFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
+              />
+            </div>
+            <div className="md:col-span-4 flex justify-end gap-2">
+              <button
+                onClick={browseTopGames}
+                disabled={isBrowsingGames}
+                className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm rounded disabled:opacity-60"
+              >
+                {isBrowsingGames ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+
+          {browseGamesError && <div className="text-xs text-red-600 bg-red-100 border border-red-200 rounded p-2">{browseGamesError}</div>}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[50vh] overflow-y-auto custom-scrollbar">
+            {browseGamesResults.map(game => {
+              const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
+              const playlistMatches = myPlaylists.filter(pl => (pl.items || []).some(item => item.title?.toLowerCase() === game.name.toLowerCase()));
+              const hasMatches = boardMatches.length > 0 || playlistMatches.length > 0;
+              return (
+                <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm relative">
+                  <div className="p-2 absolute inset-0 flex items-end justify-end pointer-events-none">
+                    <button
+                      className="pointer-events-auto bg-[var(--panel)]/80 text-[var(--text)] border border-[var(--border)] rounded-full p-2 shadow"
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setBrowseMenuPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX - 160 });
+                        setBrowseMenuGameId(game.id);
+                        setBrowseMenuGame(game);
+                      }}
+                      title="Add to..."
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  <div
+                    className="aspect-[3/4] bg-cover bg-center cursor-pointer"
+                    style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setBrowseMenuPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
+                      setBrowseMenuGameId(game.id);
+                      setBrowseMenuGame(game);
+                    }}
+                  >
+                    {!game.background_image && <div className="w-full h-full flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>}
+                    {hasMatches && (
+                      <div
+                        className="absolute top-2 left-2 px-2 py-1 rounded bg-black/50 text-white text-xs flex items-center gap-1"
+                        title={`On ${boardMatches.length} list(s), ${playlistMatches.length} playlist(s)`}
+                      >
+                        <Check size={12} />
+                        On your library
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 space-y-1">
+                    <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
+                    <div className="text-[11px] text-[var(--text-muted)]">{game.released ? game.released.split('-')[0] : 'Unknown'}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                      {game.metacritic && <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>}
+                      {game.rating && <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">⭐ {game.rating}</span>}
+                    </div>
+                  </div>
+                  {browseMenuGameId === game.id && browseMenuPos && (
+                    <div
+                      className="fixed bg-[var(--panel)] border border-[var(--border)] rounded-lg shadow-xl z-50 w-60 overflow-hidden"
+                      style={{ top: browseMenuPos.top, left: browseMenuPos.left }}
+                    >
+                      <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to list</div>
+                      {data.columnOrder.map(cid => (
+                        <button
+                          key={cid}
+                          onClick={() => handleBrowseListAction(game, cid)}
+                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex justify-between"
+                        >
+                          {data.columns[cid].title}
+                          {boardMatches.includes(cid) && <Check size={12} className="text-green-500" />}
+                        </button>
+                      ))}
+                      <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to playlist</div>
+                      {myPlaylists.length > 0 ? myPlaylists.map(pl => (
+                        <button
+                          key={pl.id}
+                          onClick={() => handleBrowsePlaylistAction(game, pl)}
+                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex justify-between"
+                        >
+                          {pl.title}
+                          {playlistMatches.find(pm => pm.id === pl.id) && <Check size={12} className="text-green-500" />}
+                        </button>
+                      )) : (
+                        <div className="px-3 py-2 text-sm text-[var(--text-muted)]">No playlists</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {!isBrowsingGames && browseGamesResults.length === 0 && (
+              <div className="text-sm text-[var(--text-muted)] col-span-full">No games to display.</div>
+            )}
+          </div>
+        </div>
+      </Modal>
       <Modal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} title="Settings & Privacy">
         <form onSubmit={handleUpdateProfile} className="space-y-6">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Display Name</label>
-            <input type="text" value={userSettings.displayName} onChange={(e) => setUserSettings({...userSettings, displayName: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none" />
+            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Display Name</label>
+            <input type="text" value={userSettings.displayName} onChange={(e) => setUserSettings({...userSettings, displayName: e.target.value})} className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--text)] focus:border-[var(--accent)] outline-none placeholder:text-[var(--text-muted)]" />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Profile Privacy</label>
+            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Profile Privacy</label>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { id: 'public', label: 'Public', icon: Users, desc: 'Visible to everyone' },
@@ -862,26 +1227,26 @@ export default function App() {
                 <div 
                   key={opt.id}
                   onClick={() => setUserSettings({ ...userSettings, privacy: opt.id })}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${userSettings.privacy === opt.id ? 'bg-purple-600/10 border-purple-500 text-purple-200' : 'bg-slate-900 border-slate-800 hover:border-slate-600'}`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${userSettings.privacy === opt.id ? 'bg-[var(--accent)]/10 border-[var(--accent)] text-[var(--text)]' : 'bg-[var(--panel-muted)] border-[var(--border)] hover:border-[var(--accent)]'}`}
                 >
                   <opt.icon size={20} className="mb-2" />
                   <div className="font-bold text-sm">{opt.label}</div>
-                  <div className="text-[10px] opacity-70">{opt.desc}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{opt.desc}</div>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Bio</label>
-            <textarea value={userSettings.bio || ''} onChange={(e) => setUserSettings({...userSettings, bio: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:border-purple-500 outline-none h-24 resize-none" placeholder="Tell us about your gaming taste..." />
+            <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">Bio</label>
+            <textarea value={userSettings.bio || ''} onChange={(e) => setUserSettings({...userSettings, bio: e.target.value})} className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--text)] focus:border-[var(--accent)] outline-none h-24 resize-none placeholder:text-[var(--text-muted)]" placeholder="Tell us about your gaming taste..." />
           </div>
-          <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg">Save Settings</button>
+          <button type="submit" className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg">Save Settings</button>
           
-          <div className="pt-4 border-t border-slate-800">
+          <div className="pt-4 border-t border-[var(--border)]">
             <button 
               type="button" 
               onClick={createDebugProfiles}
-              className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 w-full justify-center p-2 border border-slate-700 rounded-lg hover:bg-slate-800"
+              className="flex items-center gap-2 text-xs text-[var(--text-muted)] hover:text-[var(--text)] w-full justify-center p-2 border border-[var(--border)] rounded-lg hover:bg-[var(--panel-muted)]"
             >
               <Database size={12} /> Initialize Database (Fix Search)
             </button>
@@ -907,7 +1272,7 @@ export default function App() {
         {isDataLoading ? (
           <div className="h-full flex items-center justify-center animate-in fade-in"><Loader2 size={40} className="animate-spin text-purple-600" /></div>
         ) : showLanding ? (
-          <LandingPage onStart={() => setIsAddModalOpen(true)} onLogin={handleLogin} />
+          <LandingPage theme={theme} onStart={() => setIsAddModalOpen(true)} onLogin={handleLogin} />
         ) : isFavoritesView ? (
           <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between mb-6">
@@ -938,17 +1303,17 @@ export default function App() {
         ) : zoomedColumnId ? (
           <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between mb-6">
-              <button onClick={() => setZoomedColumnId(null)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ArrowLeft size={20} /><span className="font-semibold">Back to Board</span></button>
-              <div className="flex bg-slate-900 rounded-lg p-1">{data.columnOrder.map(colId => <button key={colId} onClick={() => setZoomedColumnId(colId)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${colId === zoomedColumnId ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>{data.columns[colId].title}</button>)}</div>
+              <button onClick={() => setZoomedColumnId(null)} className="flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"><ArrowLeft size={20} /><span className="font-semibold">Back to Board</span></button>
+              <div className="flex bg-[var(--panel)] border border-[var(--border)] rounded-lg p-1 shadow-sm">{data.columnOrder.map(colId => <button key={colId} onClick={() => setZoomedColumnId(colId)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${colId === zoomedColumnId ? 'bg-[var(--accent)] text-white shadow' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>{data.columns[colId].title}</button>)}</div>
             </div>
             <div className="flex items-center gap-3 mb-6">
-              <div className={`p-3 rounded-xl ${zoomedColumnId === 'backlog' ? 'bg-slate-800 text-slate-400' : zoomedColumnId === 'playing' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}><IconRenderer iconName={data.columns[zoomedColumnId].icon} size={32} /></div>
-              <div><div className="flex items-center gap-3"><h2 className="text-3xl font-bold text-white">{data.columns[zoomedColumnId].title}</h2><button onClick={() => openEditColumnModal(data.columns[zoomedColumnId])} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-white transition-colors"><Pencil size={18} /></button></div><p className="text-slate-500 text-sm">{data.columns[zoomedColumnId].itemIds.length} games in total</p></div>
+              <div className={`p-3 rounded-xl ${zoomedColumnId === 'backlog' ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : zoomedColumnId === 'playing' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400' : 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400'}`}><IconRenderer iconName={data.columns[zoomedColumnId].icon} size={32} /></div>
+              <div><div className="flex items-center gap-3"><h2 className="text-3xl font-bold text-[var(--text)]">{data.columns[zoomedColumnId].title}</h2><button onClick={() => openEditColumnModal(data.columns[zoomedColumnId])} className="p-1.5 hover:bg-[var(--panel-muted)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"><Pencil size={18} /></button></div><p className="text-[var(--text-muted)] text-sm">{data.columns[zoomedColumnId].itemIds.length} games in total</p></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {data.columns[zoomedColumnId].itemIds.filter(id => { if (activePlatformFilter === 'All') return true; return data.games[id]?.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase()); }).map(gameId => <GridGameCard key={gameId} game={data.games[gameId]} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEdit={openGameCard} onToggleFavorite={toggleFavorite} />)}
             </div>
-            {data.columns[zoomedColumnId].itemIds.length === 0 && <div className="h-64 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl"><GripVertical size={32} className="mb-4 opacity-50" /><span className="text-lg">No games here yet</span></div>}
+            {data.columns[zoomedColumnId].itemIds.length === 0 && <div className="h-64 flex flex-col items-center justify-center text-[var(--text-muted)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--panel)]/30"><GripVertical size={32} className="mb-4 opacity-50" /><span className="text-lg">No games here yet</span></div>}
           </div>
         ) : (
           isListView ? (
@@ -1003,7 +1368,7 @@ export default function App() {
           ) : (
             <div className="flex justify-center h-full"> 
               <div className="flex flex-col md:flex-row gap-6 items-start h-full overflow-x-auto pb-4 animate-in fade-in duration-500 max-w-full w-fit mx-auto px-4">
-              {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} playlists={playlists} onAddToPlaylist={addGameToPlaylist} />)}
+      {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} playlists={myPlaylists} onAddToPlaylist={addGameToPlaylist} onCreatePlaylistAndAdd={createPlaceholderPlaylist} />)}
                 {data.columnOrder.length < 5 && (
                   <div className="shrink-0 w-80 p-4">
                     <button
@@ -1050,27 +1415,27 @@ export default function App() {
       </Modal>
 
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add to your games...">
-        <div className="space-y-4">
-          <form onSubmit={searchGames} className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={18} />
-              <input
-                autoFocus
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search database..."
-                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg pl-10 pr-4 py-2.5 text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={isSearching}
-              className="px-4 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg disabled:opacity-50"
-            >
-              {isSearching ? <Loader2 className="animate-spin" size={20} /> : 'Search'}
-            </button>
-          </form>
+          <div className="space-y-4">
+            <form onSubmit={searchGames} className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={18} />
+                <input
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search database..."
+                  className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg pl-10 pr-4 py-2.5 text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSearching}
+                className="px-4 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-bold rounded-lg shadow-lg disabled:opacity-50"
+              >
+                {isSearching ? <Loader2 className="animate-spin" size={20} /> : 'Search'}
+              </button>
+            </form>
           {searchError && <div className="p-3 bg-red-100 border border-red-200 rounded-lg text-red-700 text-sm">{searchError}</div>}
           <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
             {searchResults.map(game => (
@@ -1099,6 +1464,9 @@ export default function App() {
                 <Plus size={18} className="text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
               </button>
             ))}
+            {!isSearching && searchQuery.trim() && searchResults.length === 0 && (
+              <div className="text-sm text-[var(--text-muted)] px-2 py-2">No results found.</div>
+            )}
           </div>
         </div>
       </Modal>
@@ -1193,55 +1561,55 @@ export default function App() {
       <Modal isOpen={isFriendsModalOpen} onClose={() => setIsFriendsModalOpen(false)} title="Connections">
         <div className="space-y-4">
           <section>
-            <div className="text-xs uppercase text-slate-500 mb-2">Following</div>
+            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Following</div>
             <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
               {Object.values(relationships.following || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{p.status === 'pending' ? 'Request sent' : 'Following'}</div>
+                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">{p.status === 'pending' ? 'Request sent' : 'Following'}</div>
                   </div>
-                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">View</button>
-                  <button onClick={() => unfollow(p.uid)} className="text-xs px-2 py-1 rounded bg-red-900/40 text-red-200">Unfollow</button>
+                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">View</button>
+                  <button onClick={() => unfollow(p.uid)} className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Unfollow</button>
                 </div>
               ))}
-              {Object.keys(relationships.following || {}).length === 0 && <div className="text-xs text-slate-600">Not following anyone yet.</div>}
+              {Object.keys(relationships.following || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">Not following anyone yet.</div>}
             </div>
           </section>
 
           <section>
-            <div className="text-xs uppercase text-slate-500 mb-2">Followers</div>
+            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Followers</div>
             <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
               {Object.values(relationships.followers || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{p.status || 'Follower'}</div>
+                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">{p.status || 'Follower'}</div>
                   </div>
-                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">View</button>
-                  <button onClick={() => handleBlockAction(p)} className="text-xs px-2 py-1 rounded bg-red-900/40 text-red-200">Block</button>
+                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">View</button>
+                  <button onClick={() => handleBlockAction(p)} className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
                 </div>
               ))}
-              {Object.keys(relationships.followers || {}).length === 0 && <div className="text-xs text-slate-600">No followers yet.</div>}
+              {Object.keys(relationships.followers || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">No followers yet.</div>}
             </div>
           </section>
 
           <section>
-            <div className="text-xs uppercase text-slate-500 mb-2">Blocked</div>
+            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Blocked</div>
             <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
               {Object.values(relationships.blocked || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
+                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-slate-500 truncate">Blocked</div>
+                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">Blocked</div>
                   </div>
-                  <button onClick={() => unblock(p.uid)} className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">Unblock</button>
+                  <button onClick={() => unblock(p.uid)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">Unblock</button>
                 </div>
               ))}
-              {Object.keys(relationships.blocked || {}).length === 0 && <div className="text-xs text-slate-600">No blocked users.</div>}
+              {Object.keys(relationships.blocked || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">No blocked users.</div>}
             </div>
           </section>
         </div>
@@ -1312,8 +1680,8 @@ export default function App() {
           <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl p-4 flex flex-col gap-4">
               {isPlaylistDetailOpen && selectedPlaylist ? (
                 <div className="flex flex-col gap-4 h-full">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
                     <div className="text-xl font-bold text-[var(--text)]">{selectedPlaylist.title}</div>
                     {selectedPlaylist.description ? (
                       <div className="text-sm text-[var(--text-muted)]">{selectedPlaylist.description}</div>
@@ -1333,6 +1701,12 @@ export default function App() {
                       {selectedPlaylist.privacy === 'private' ? 'Private' : 'Public'}
                     </span>
                     <div className="text-xs text-[var(--text-muted)]">{selectedPlaylist.items?.length || 0} games</div>
+                    <button
+                      onClick={() => setIsAddModalOpen(true)}
+                      className="text-[11px] px-3 py-1.5 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-semibold"
+                    >
+                      Add games
+                    </button>
                   </div>
                 </div>
 

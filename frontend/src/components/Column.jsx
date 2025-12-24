@@ -3,7 +3,7 @@ import { GripVertical, Pencil, LayoutGrid } from 'lucide-react';
 import GameCard from './GameCard';
 import IconRenderer from './IconRenderer';
 
-const Column = ({ column, games, onDragOver, onDrop, onDragStart, onMoveRequest, onDelete, isDraggingOver, filterPlatform, onHeaderClick, onEditColumn, onEditGame, onToggleFavorite, playlists, onAddToPlaylist }) => {
+const Column = ({ column, games, onDragOver, onDrop, onDragStart, onMoveRequest, onDelete, isDraggingOver, filterPlatform, onHeaderClick, onEditColumn, onEditGame, onToggleFavorite, playlists, onAddToPlaylist, onCreatePlaylistAndAdd }) => {
   const filteredItemIds = column.itemIds.filter(gameId => { if (!filterPlatform || filterPlatform === 'All') return true; const game = games[gameId]; return game?.platform?.toLowerCase().includes(filterPlatform.toLowerCase()); });
   return (
     <div
@@ -38,7 +38,7 @@ const Column = ({ column, games, onDragOver, onDrop, onDragStart, onMoveRequest,
         </div>
       </div>
       <div className="p-3 flex-1 overflow-y-auto min-h-[150px] max-h-[calc(100vh-220px)] custom-scrollbar bg-[var(--panel)]">
-        {filteredItemIds.map((gameId, index) => { const game = games[gameId]; if (!game) return null; return (<GameCard key={game.id} game={game} index={index} columnId={column.id} onDragStart={onDragStart} onMoveRequest={onMoveRequest} onDelete={onDelete} onEdit={onEditGame} onToggleFavorite={onToggleFavorite} playlists={playlists} onAddToPlaylist={onAddToPlaylist} />); })}
+        {filteredItemIds.map((gameId, index) => { const game = games[gameId]; if (!game) return null; return (<GameCard key={game.id} game={game} index={index} columnId={column.id} onDragStart={onDragStart} onMoveRequest={onMoveRequest} onDelete={onDelete} onEdit={onEditGame} onToggleFavorite={onToggleFavorite} playlists={playlists} onAddToPlaylist={onAddToPlaylist} onCreatePlaylistAndAdd={onCreatePlaylistAndAdd} />); })}
         {column.itemIds.length === 0 && (
           <div className="h-32 flex flex-col items-center justify-center text-[var(--text-muted)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--panel-muted)]/40">
             <GripVertical size={24} className="mb-2 opacity-50" />

@@ -3,9 +3,11 @@ import { MoreVertical, ImageIcon, Trash2, Heart, Star } from 'lucide-react';
 import useClickOutside from '../hooks/useClickOutside';
 import { PLACEHOLDER_COVERS } from '../config/constants';
 
-const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite, playlists, onAddToPlaylist }) => {
+const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite, playlists, onAddToPlaylist, onCreatePlaylistAndAdd }) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
   const menuRef = useRef(null);
+  const menuButtonRef = useRef(null);
   useClickOutside(menuRef, () => setShowMenu(false));
 
   const handleScoreClick = (e) => { e.stopPropagation(); onEdit(game, true); };
@@ -28,48 +30,68 @@ const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete,
               <span className="px-1.5 py-0.5 bg-[var(--panel-strong)] text-[var(--text)] text-[10px] rounded border border-[var(--border)]">{game.genre}</span>
             </div>
           </div>
-          <div className="flex items-center justify-end gap-3 mt-2 interactive-area">
-            <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(game.id); }} className={`p-1.5 rounded-full transition-colors ${game.isFavorite ? 'text-red-500 bg-red-500/10' : 'text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--panel)]'}`} title={game.isFavorite ? "Remove from Favorites" : "Add to Favorites"}><Heart size={18} className={game.isFavorite ? "fill-current" : ""} /></button>
-            <div onClick={handleScoreClick} className="flex items-center gap-1.5 bg-[var(--panel)] px-2 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] cursor-pointer transition-colors">
-              <Star size={12} className={game.rating > 0 ? "text-yellow-500 fill-current" : "text-[var(--text-muted)]"} />
-              <span className={`text-xs font-bold ${game.rating > 0 ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}`}>{game.rating > 0 ? game.rating : '--'}</span>
+            <div className="flex items-center justify-end gap-3 mt-2 interactive-area">
+              <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(game.id); }} className={`p-1.5 rounded-full transition-colors ${game.isFavorite ? 'text-red-500 bg-red-500/10' : 'text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--panel)]'}`} title={game.isFavorite ? "Remove from Favorites" : "Add to Favorites"}><Heart size={18} className={game.isFavorite ? "fill-current" : ""} /></button>
+              <div onClick={handleScoreClick} className="flex items-center gap-1.5 bg-[var(--panel)] px-2 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] cursor-pointer transition-colors">
+                <Star size={12} className={game.rating > 0 ? "text-yellow-500 fill-current" : "text-[var(--text-muted)]"} />
+                <span className={`text-xs font-bold ${game.rating > 0 ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}`}>{game.rating > 0 ? game.rating : '--'}</span>
+              </div>
+              <div className="h-4 w-px bg-[var(--border)] mx-1"></div>
+              <div className="relative" ref={menuRef}>
+                <button
+                  ref={menuButtonRef}
+                  onClick={() => {
+                    const next = !showMenu;
+                    if (!showMenu && menuButtonRef.current) {
+                      const rect = menuButtonRef.current.getBoundingClientRect();
+                      const menuWidth = 224; // w-56
+                      setMenuPos({
+                        top: rect.bottom + 4 + window.scrollY,
+                        left: rect.right - menuWidth + window.scrollX
+                      });
+                    }
+                    setShowMenu(next);
+                  }}
+                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded-full transition-colors"
+                >
+                  <MoreVertical size={18} />
+                </button>
+                {showMenu && menuPos && (
+                  <div
+                    className="fixed bg-[var(--panel)] border border-[var(--border)] shadow-xl rounded-lg z-50 w-56 overflow-hidden py-1"
+                    style={{ top: menuPos.top, left: menuPos.left }}
+                  >
+                    <button onClick={() => { onEdit(game, false); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex items-center gap-2">
+                      <ImageIcon size={14} /> View Card
+                    </button>
+                    <div className="h-px bg-[var(--border)] my-1"></div>
+                    <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Move to...</div>
+                    <button onClick={() => onMoveRequest(game.id, 'backlog')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-purple-100 hover:text-purple-700 dark:hover:bg-purple-900/30 dark:hover:text-purple-300">To Play</button>
+                    <button onClick={() => onMoveRequest(game.id, 'playing')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300">Playing</button>
+                    <button onClick={() => onMoveRequest(game.id, 'completed')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-300">Completed</button>
+                    <div className="h-px bg-[var(--border)] my-1"></div>
+                    <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to playlist</div>
+                    {(playlists && playlists.length > 0) ? (
+                      playlists.map(pl => (
+                        <button
+                          key={pl.id}
+                          onClick={() => { onAddToPlaylist(pl.id, game); setShowMenu(false); }}
+                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] truncate"
+                        >
+                          {pl.title}
+                        </button>
+                      ))
+                    ) : (
+                      <button onClick={() => { onCreatePlaylistAndAdd?.(game); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]">Create a new playlist</button>
+                    )}
+                    <div className="h-px bg-[var(--border)] my-1"></div>
+                    <button onClick={() => onDelete(game.id)} className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 flex items-center gap-2">
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="h-4 w-px bg-[var(--border)] mx-1"></div>
-            <div className="relative" ref={menuRef}>
-              <button onClick={() => setShowMenu(!showMenu)} className="p-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded-full transition-colors"><MoreVertical size={18} /></button>
-              {showMenu && (
-                <div className="absolute right-0 top-8 bg-[var(--panel)] border border-[var(--border)] shadow-xl rounded-lg z-20 w-48 overflow-hidden py-1">
-                  <button onClick={() => { onEdit(game, false); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex items-center gap-2">
-                    <ImageIcon size={14} /> View Card
-                  </button>
-                  <div className="h-px bg-[var(--border)] my-1"></div>
-                  <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Move to...</div>
-                  <button onClick={() => onMoveRequest(game.id, 'backlog')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-purple-100 hover:text-purple-700 dark:hover:bg-purple-900/30 dark:hover:text-purple-300">To Play</button>
-                  <button onClick={() => onMoveRequest(game.id, 'playing')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300">Playing</button>
-                  <button onClick={() => onMoveRequest(game.id, 'completed')} className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-300">Completed</button>
-                  <div className="h-px bg-[var(--border)] my-1"></div>
-                  <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to playlist</div>
-                  {(playlists && playlists.length > 0) ? (
-                    playlists.map(pl => (
-                      <button
-                        key={pl.id}
-                        onClick={() => { onAddToPlaylist(pl.id, game); setShowMenu(false); }}
-                        className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] truncate"
-                      >
-                        {pl.title}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No playlists yet</div>
-                  )}
-                  <div className="h-px bg-[var(--border)] my-1"></div>
-                  <button onClick={() => onDelete(game.id)} className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 flex items-center gap-2">
-                    <Trash2 size={14} /> Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </div>
