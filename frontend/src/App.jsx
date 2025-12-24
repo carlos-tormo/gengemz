@@ -119,6 +119,9 @@ export default function App() {
   const [browseMenuGameId, setBrowseMenuGameId] = useState(null);
   const [browseMenuPos, setBrowseMenuPos] = useState(null);
   const [browseMenuGame, setBrowseMenuGame] = useState(null);
+  const [isPlaylistAddOpen, setIsPlaylistAddOpen] = useState(false);
+  const [hoveredPlaylistItemIdx, setHoveredPlaylistItemIdx] = useState(null);
+  const [selectedPlaylistItemIdx, setSelectedPlaylistItemIdx] = useState(null);
 
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
@@ -185,6 +188,26 @@ export default function App() {
       setIsPlaylistDetailOpen(true);
     }
   }, [isPlaylistsModalOpen, myPlaylists, selectedPlaylist]);
+
+  useEffect(() => {
+    if (!isPlaylistsModalOpen) {
+      setIsPlaylistAddOpen(false);
+      setPlaylistSearchQuery('');
+      setPlaylistSearchResults([]);
+      setPlaylistSearchError(null);
+      setIsSearchingPlaylistGames(false);
+    }
+  }, [isPlaylistsModalOpen]);
+
+  useEffect(() => {
+    setIsPlaylistAddOpen(false);
+    setPlaylistSearchQuery('');
+    setPlaylistSearchResults([]);
+    setPlaylistSearchError(null);
+    setIsSearchingPlaylistGames(false);
+    setHoveredPlaylistItemIdx(null);
+    setSelectedPlaylistItemIdx(null);
+  }, [selectedPlaylist?.id]);
 
   // Default delete options when opening the column modal
   useEffect(() => {
@@ -463,6 +486,23 @@ export default function App() {
     await updatePlaylistFields(pl.id, { description: newDesc });
   };
 
+  const handleRemovePlaylistItem = async (pl, idx) => {
+    if (!pl?.id) return;
+    const items = pl.items || [];
+    const target = items[idx];
+    if (!target) return;
+    const confirmed = confirm(`Remove "${target.title}" from ${pl.title}?`);
+    if (!confirmed) return;
+    const updated = items.filter((_, i) => i !== idx);
+    try {
+      await updateDoc(doc(db, 'artifacts', APP_ID, 'playlists', pl.id), { items: updated, updatedAt: serverTimestamp() });
+      setSelectedPlaylist(prev => prev?.id === pl.id ? { ...prev, items: updated } : prev);
+      setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
+    } catch (err) {
+      alert(err.message || "Failed to remove game");
+    }
+  };
+
   const handleDeletePlaylist = async (pl) => {
     const confirmDelete = confirm(`Delete playlist "${pl.title}"?`);
     if (!confirmDelete) return;
@@ -593,8 +633,11 @@ export default function App() {
         if (!confirm(`Remove "${item.title}" from ${pl.title}?`)) return;
         const updated = current.filter(it => !(it.originId === exists.originId || it.title === exists.title));
         await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
+        setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
       } else {
-        await updateDoc(plRef, { items: [...current, item], updatedAt: serverTimestamp() });
+        const updated = [...current, item];
+        await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
+        setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
       }
     } catch (err) {
       alert(err.message || "Failed to update playlist");
@@ -617,7 +660,10 @@ export default function App() {
         return;
       }
       const newItem = playlistItemFromGame(game);
-      await updateDoc(plRef, { items: [...current, newItem], updatedAt: serverTimestamp() });
+      const updatedItems = [...current, newItem];
+      await updateDoc(plRef, { items: updatedItems, updatedAt: serverTimestamp() });
+      setSelectedPlaylist(prev => prev?.id === playlistId ? { ...prev, items: updatedItems } : prev);
+      setPlaylists(prev => prev.map(pl => pl.id === playlistId ? { ...pl, items: updatedItems } : pl));
     } catch (err) {
       console.error("Add to playlist failed", err);
       alert(err.message || "Failed to add to playlist");
@@ -1702,13 +1748,93 @@ export default function App() {
                     </span>
                     <div className="text-xs text-[var(--text-muted)]">{selectedPlaylist.items?.length || 0} games</div>
                     <button
-                      onClick={() => setIsAddModalOpen(true)}
+                      onClick={() => setIsPlaylistAddOpen(prev => !prev)}
                       className="text-[11px] px-3 py-1.5 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-semibold"
                     >
                       Add games
                     </button>
                   </div>
                 </div>
+
+                {isPlaylistAddOpen && (
+                  <div className="border border-[var(--border)] rounded-lg bg-[var(--panel-muted)] p-3">
+                    <form onSubmit={handlePlaylistSearch} className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <Search size={16} className="absolute left-3 top-2.5 text-[var(--text-muted)]" />
+                        <input
+                          className="w-full pl-9 pr-9 py-2 rounded border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] focus:border-[var(--accent)] outline-none"
+                          placeholder="Search games to add..."
+                          value={playlistSearchQuery}
+                          onChange={(e) => setPlaylistSearchQuery(e.target.value)}
+                        />
+                        {playlistSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => { setPlaylistSearchQuery(''); setPlaylistSearchResults([]); }}
+                            className="absolute right-2 top-2 text-[var(--text-muted)] hover:text-[var(--text)]"
+                            aria-label="Clear search"
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold"
+                      >
+                        {isSearchingPlaylistGames ? 'Searching...' : 'Search'}
+                      </button>
+                    </form>
+                    {playlistSearchError && (
+                      <div className="text-xs text-red-400 mt-2">{playlistSearchError}</div>
+                    )}
+                    <div className="mt-3 space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                      {isSearchingPlaylistGames && (
+                        <div className="text-sm text-[var(--text-muted)]">Searching games...</div>
+                      )}
+                      {!isSearchingPlaylistGames && playlistSearchQuery.trim() && playlistSearchResults.length === 0 && (
+                        <div className="text-sm text-[var(--text-muted)]">No results found.</div>
+                      )}
+                      {playlistSearchResults.map((g) => {
+                        const mapped = gameFromRaw(g);
+                        const exists = (selectedPlaylist.items || []).some(
+                          it => it.title?.toLowerCase() === mapped.title.toLowerCase()
+                        );
+                        return (
+                          <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 rounded border border-[var(--border)] bg-[var(--panel)]">
+                            <div
+                              className="w-12 h-12 rounded bg-[var(--panel-muted)] border border-[var(--border)] flex-shrink-0 overflow-hidden"
+                              style={{ backgroundImage: mapped.cover ? `url(${mapped.cover})` : PLACEHOLDER_COVERS[(mapped.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-[var(--text)] truncate">{mapped.title}</div>
+                              <div className="text-[11px] text-[var(--text-muted)] truncate">
+                                {(mapped.year || '').toString()} {mapped.year ? '·' : ''} {mapped.platform}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (exists) {
+                                  const idx = (selectedPlaylist.items || []).findIndex(it => it.title?.toLowerCase() === mapped.title.toLowerCase());
+                                  if (idx > -1) handleRemovePlaylistItem(selectedPlaylist, idx);
+                                } else {
+                                  addGameToPlaylist(selectedPlaylist.id, mapped);
+                                }
+                              }}
+                              className={`text-xs px-3 py-1.5 rounded font-semibold ${
+                                exists
+                                  ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                                  : 'bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white'
+                              }`}
+                            >
+                              {exists ? 'In playlist' : 'Add'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="border border-[var(--border)] rounded-lg overflow-hidden flex-1 bg-[var(--panel-muted)]">
                   <div className="grid grid-cols-[32px_44px_1fr_1fr_140px] px-4 py-2 text-[11px] uppercase text-[var(--text-muted)] border-b border-[var(--border)]">
@@ -1721,8 +1847,16 @@ export default function App() {
                   <div className="max-h-[520px] overflow-y-auto custom-scrollbar divide-y divide-[var(--border)]">
                     {(selectedPlaylist.items || []).map((item, idx) => {
                       const exists = isGameOnBoard(data, item);
+                      const isHovered = hoveredPlaylistItemIdx === idx;
+                      const isSelected = selectedPlaylistItemIdx === idx;
                       return (
-                        <div key={`${item.title}-${idx}`} className="grid grid-cols-[32px_44px_1fr_1fr_140px] items-center px-4 py-3 gap-2">
+                        <div
+                          key={`${item.title}-${idx}`}
+                          className={`grid grid-cols-[32px_44px_1fr_1fr_140px] items-center px-4 py-3 gap-2 ${isSelected ? 'bg-[var(--panel)]/60' : ''}`}
+                          onMouseEnter={() => setHoveredPlaylistItemIdx(idx)}
+                          onMouseLeave={() => setHoveredPlaylistItemIdx(null)}
+                          onClick={() => setSelectedPlaylistItemIdx(idx)}
+                        >
                           <span className="text-xs text-[var(--text-muted)]">{idx + 1}</span>
                           <div className="w-10 h-10 rounded bg-[var(--panel)] border border-[var(--border)] overflow-hidden" style={{ backgroundImage: item.cover ? `url(${item.cover})` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }} />
                           <div className="min-w-0">
@@ -1731,6 +1865,15 @@ export default function App() {
                           </div>
                           <div className="text-xs text-[var(--text-muted)] truncate">{item.genre || '—'}</div>
                           <div className="flex items-center gap-2 justify-end">
+                            {(isHovered || isSelected) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRemovePlaylistItem(selectedPlaylist, idx); }}
+                                className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 text-red-400"
+                                title="Remove from playlist"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            )}
                             {exists ? (
                               <span className="text-[11px] px-2 py-1 rounded-full border border-green-400 text-green-700 dark:text-green-300 dark:border-green-600">On board</span>
                             ) : (
