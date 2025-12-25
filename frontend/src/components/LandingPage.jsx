@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight, LogIn } from 'lucide-react';
-import logoWordmarkLight from '../assets/logo-wordmark-light.svg';
-import logoWordmarkDark from '../assets/logo-wordmark-dark.svg';
+import logoWordmarkLight from '../assets/logo-wordmark-light-2026.svg';
+import logoWordmarkDark from '../assets/logo-wordmark-dark-2026.svg';
 
 const LandingPage = ({ onStart, onLogin, theme }) => {
   return (

@@ -30,8 +30,10 @@ import GridGameCard from './components/GridGameCard';
 import Column from './components/Column';
 import UserMenu from './components/UserMenu';
 import LandingPage from './components/LandingPage';
-import logoWordmarkLight from './assets/logo-wordmark-light.svg';
-import logoWordmarkDark from './assets/logo-wordmark-dark.svg';
+import logoWordmarkLight from './assets/logo-wordmark-light-2026.svg';
+import logoWordmarkDark from './assets/logo-wordmark-dark-2026.svg';
+import logoIconLight from './assets/logo-icon-light-2026.svg';
+import logoIconDark from './assets/logo-icon-dark-2026.svg';
 
 // Hooks
 import useClickOutside from './hooks/useClickOutside';
@@ -953,9 +955,14 @@ export default function App() {
       <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--glass)] backdrop-blur-md border-b border-[var(--border)] z-40 flex items-center justify-between px-4 md:px-8">
         <div className="flex items-center gap-3">
           <img
+            src={theme === 'light' ? logoIconLight : logoIconDark}
+            alt="Gengemz"
+            className="h-9 w-auto md:hidden rounded-lg"
+          />
+          <img
             src={theme === 'light' ? logoWordmarkLight : logoWordmarkDark}
             alt="Gengemz"
-            className="h-8 w-auto"
+            className="h-8 w-auto hidden md:block"
           />
           <span className="sr-only">Gengemz</span>
           {!showLanding && (
