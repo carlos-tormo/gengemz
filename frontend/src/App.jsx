@@ -4,7 +4,7 @@ import {
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
   ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid, List,
   Pencil, Lock, Unlock, Calendar, Heart, Star,
-  Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun
+  Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun, Menu
 } from 'lucide-react';
 // Firebase imports
 import { auth, db } from './config/firebase';
@@ -30,8 +30,8 @@ import GridGameCard from './components/GridGameCard';
 import Column from './components/Column';
 import UserMenu from './components/UserMenu';
 import LandingPage from './components/LandingPage';
-import logoWordmarkLight from './assets/logo-wordmark-light-2026.svg';
-import logoWordmarkDark from './assets/logo-wordmark-dark-2026.svg';
+import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
+import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
 import logoIconLight from './assets/logo-icon-light-2026.svg';
 import logoIconDark from './assets/logo-icon-dark-2026.svg';
 
@@ -91,6 +91,11 @@ export default function App() {
   const [userSearchResults, setUserSearchResults] = useState([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [userSearchError, setUserSearchError] = useState(null);
+  const [navSearchMode, setNavSearchMode] = useState('games'); // 'players' | 'games'
+  const [navGameResults, setNavGameResults] = useState([]);
+  const [navGameError, setNavGameError] = useState(null);
+  const [isSearchingNavGames, setIsSearchingNavGames] = useState(false);
+  const [navGameHasSearched, setNavGameHasSearched] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
   const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
@@ -124,6 +129,7 @@ export default function App() {
   const [isPlaylistAddOpen, setIsPlaylistAddOpen] = useState(false);
   const [hoveredPlaylistItemIdx, setHoveredPlaylistItemIdx] = useState(null);
   const [selectedPlaylistItemIdx, setSelectedPlaylistItemIdx] = useState(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // New User Settings State
   const [userSettings, setUserSettings] = useState({
@@ -135,6 +141,7 @@ export default function App() {
   const dataRef = useRef(INITIAL_DATA);
   const userRef = useRef(null);
   const userSearchRef = useRef(null);
+  const mobileMenuRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { userRef.current = user; }, [user]);
@@ -169,7 +176,11 @@ export default function App() {
   useClickOutside(userSearchRef, () => {
     setUserSearchResults([]);
     setUserSearchError(null);
+    setNavGameResults([]);
+    setNavGameError(null);
+    setNavGameHasSearched(false);
   });
+  useClickOutside(mobileMenuRef, () => setIsMobileMenuOpen(false));
 
   // Load playlists (public)
   useEffect(() => {
@@ -363,28 +374,51 @@ export default function App() {
 
   const handleUserSearch = async (e) => {
     e.preventDefault();
-    if (!userSearchQuery.trim()) {
-      setUserSearchResults([]);
-      return;
-    }
-    setIsSearchingUsers(true);
-    setUserSearchError(null);
-    try {
-      const q = query(collection(db, 'artifacts', APP_ID, 'public_profiles'), where("privacy", "in", ["public", "invite_only"]));
-      const querySnapshot = await getDocs(q);
-      const results = [];
-      querySnapshot.forEach((doc) => {
-        const p = doc.data();
-        if (p.displayName && p.displayName.toLowerCase().includes(userSearchQuery.toLowerCase())) {
-          results.push(p);
-        }
-      });
-      setUserSearchResults(results);
-    } catch (e) {
-      console.error("Search failed", e);
-      setUserSearchError("Search failed. Try again.");
-    } finally {
-      setIsSearchingUsers(false);
+    if (navSearchMode === 'players') {
+      if (!userSearchQuery.trim()) {
+        setUserSearchResults([]);
+        return;
+      }
+      setIsSearchingUsers(true);
+      setUserSearchError(null);
+      try {
+        const q = query(collection(db, 'artifacts', APP_ID, 'public_profiles'), where("privacy", "in", ["public", "invite_only"]));
+        const querySnapshot = await getDocs(q);
+        const results = [];
+        querySnapshot.forEach((doc) => {
+          const p = doc.data();
+          if (p.displayName && p.displayName.toLowerCase().includes(userSearchQuery.toLowerCase())) {
+            results.push(p);
+          }
+        });
+        setUserSearchResults(results);
+      } catch (e) {
+        console.error("Search failed", e);
+        setUserSearchError("Search failed. Try again.");
+      } finally {
+        setIsSearchingUsers(false);
+      }
+    } else {
+      if (!userSearchQuery.trim()) {
+        setNavGameResults([]);
+        setNavGameHasSearched(false);
+        return;
+      }
+      setNavGameHasSearched(true);
+      setIsSearchingNavGames(true);
+      setNavGameError(null);
+      try {
+        await fetchGamesWithVariants(userSearchQuery, {
+          onResults: setNavGameResults,
+          onError: setNavGameError,
+          setLoading: setIsSearchingNavGames,
+        });
+      } catch (e) {
+        console.error("Game search failed", e);
+        setNavGameError("Search failed. Try again.");
+      } finally {
+        setIsSearchingNavGames(false);
+      }
     }
   };
 
@@ -952,109 +986,238 @@ export default function App() {
         </div>
       </div>
 
-      <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--glass)] backdrop-blur-md border-b border-[var(--border)] z-40 flex items-center justify-between px-4 md:px-8">
-        <div className="flex items-center gap-3">
-          <img
-            src={theme === 'light' ? logoIconLight : logoIconDark}
-            alt="Gengemz"
-            className="h-9 w-auto md:hidden rounded-lg"
-          />
-          <img
-            src={theme === 'light' ? logoWordmarkLight : logoWordmarkDark}
-            alt="Gengemz"
-            className="h-8 w-auto hidden md:block"
-          />
-          <span className="sr-only">Gengemz</span>
-          {!showLanding && (
-            <div className="hidden md:flex ml-8 relative group" ref={userSearchRef}>
-              <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-purple-400" size={16} />
-              <form onSubmit={handleUserSearch} className="relative">
-                <input 
-                  type="text" 
-                  placeholder="Find players..." 
-                  value={userSearchQuery}
-                  onChange={(e) => { setUserSearchQuery(e.target.value); }}
-                  className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:w-64 w-48 transition-all outline-none placeholder:text-[var(--text-muted)]"
-                />
-                <button 
-                  type="submit"
-                  className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
-                >
-                  {isSearchingUsers ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                </button>
-              </form>
-              {(userSearchResults.length > 0 || userSearchError) && userSearchQuery && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-80">
-                  {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
-                  <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
-                    {userSearchResults.map(res => (
-                      <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
-                        <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
-                          <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
-                            {res.privacy === 'invite_only' && <Lock size={10} />}
-                            {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
-                          </div>
-                        </div>
-                        <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
-                          <Users size={14} />
-                        </button>
-                        <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
-                          <UserPlus size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    {userSearchResults.length === 0 && !userSearchError && (
-                      <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
-                    )}
+      <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--glass)] backdrop-blur-md border-b border-[var(--border)] z-40 px-4 md:px-8 flex items-center">
+        {/* Mobile bar */}
+        <div className="flex items-center justify-between w-full gap-2 md:hidden">
+          <div className="flex items-center gap-2">
+            <div className="relative" ref={mobileMenuRef}>
+              <button
+                onClick={() => setIsMobileMenuOpen(v => !v)}
+                className="p-2 rounded-lg bg-[var(--panel)] border border-[var(--border)] hover:border-[var(--accent)] text-[var(--text)]"
+                aria-label="Open menu"
+              >
+                <Menu size={18} />
+              </button>
+              {isMobileMenuOpen && (
+                <div className="absolute left-0 top-12 w-56 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="divide-y divide-[var(--border)] text-sm text-[var(--text)]">
+                    <button onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Playlists</button>
+                    <button onClick={() => { setIsFavoritesView(v => !v); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isFavoritesView ? 'Exit favorites' : 'Favorites'}</button>
+                    <button onClick={() => { setIsListView(v => !v); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isListView ? 'Grid view' : 'List view'}</button>
+                    <button onClick={() => { setIsSettingsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Settings</button>
+                    <button onClick={() => { setIsFriendsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Friends</button>
                   </div>
                 </div>
               )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-           {!isDataLoading && (
-             <button
-               onClick={toggleTheme}
-               className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-               title={theme === 'dark' ? "Switch to light mode" : "Switch to dark mode"}
-             >
-               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-             </button>
-           )}
-           {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
-          {!showLanding && !isDataLoading && !isFavoritesView && (
+            <img
+              src={theme === 'light' ? logoWordmarkLight : logoWordmarkDark}
+              alt="Gengemz"
+              className="h-6 w-auto"
+            />
+          </div>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setIsListView(!isListView)}
-              className={`p-2 rounded-full transition-colors ${isListView ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-              title={isListView ? "Grid view" : "List view"}
-             >
-               <List size={18} />
-             </button>
-           )}
-          {!showLanding && !isDataLoading && !isFavoritesView && (
-            <button
-              onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
-              className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title="Playlists"
+              onClick={toggleTheme}
+              className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              aria-label="Toggle theme"
             >
-              <LayoutGrid size={18} />
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-          )}
-          {!isDataLoading && (
             <button
               onClick={() => { setIsBrowseGamesModalOpen(true); browseTopGames(); }}
-              className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title="Browse games"
+              className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
+              aria-label="Browse games"
             >
-              <Search size={18} />
+              <Database size={18} />
             </button>
-          )}
-          {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
-          {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
-       </div>
+            <button
+              onClick={() => { setIsSettingsModalOpen(true); }}
+              className="rounded-full border border-[var(--border)] overflow-hidden w-10 h-10 flex items-center justify-center bg-[var(--panel)]"
+              aria-label="Profile"
+            >
+              {user?.photoURL ? (
+                <img src={user.photoURL} alt="Avatar" className="w-full h-full rounded-full object-cover" />
+              ) : (
+                <div className="w-full h-full rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-sm font-bold uppercase">
+                  {(user?.displayName || 'G')[0]}
+                </div>
+              )}
+            </button>
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="px-3 py-2 rounded-lg bg-[var(--accent)] text-white font-semibold shadow-md hover:bg-[var(--accent-strong)]"
+              aria-label="Add game"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Desktop bar */}
+        <div className="hidden md:flex items-center justify-between w-full">
+          <div className="flex items-center gap-3">
+            <img
+              src={theme === 'light' ? logoWordmarkLight : logoWordmarkDark}
+              alt="Gengemz"
+              className="h-8 w-auto"
+            />
+            <span className="sr-only">Gengemz</span>
+            {!showLanding && (
+              <div className="hidden md:flex items-center gap-3 ml-6" ref={userSearchRef}>
+                <div className="relative">
+                  <form onSubmit={handleUserSearch} className="relative">
+                    <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-purple-400" size={16} />
+                    <input 
+                      type="text" 
+                      placeholder={navSearchMode === 'players' ? "Find players..." : "Find games..."}
+                      value={userSearchQuery}
+                    onChange={(e) => { 
+                      const val = e.target.value;
+                      setUserSearchQuery(val); 
+                      if (!val.trim()) { 
+                        setUserSearchResults([]); 
+                        setUserSearchError(null); 
+                        setNavGameResults([]); 
+                        setNavGameError(null); 
+                        setNavGameHasSearched(false); 
+                      }
+                    }}
+                    className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:w-64 w-48 transition-all outline-none placeholder:text-[var(--text-muted)]"
+                  />
+                  <button 
+                    type="submit"
+                    className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
+                  >
+                    {(navSearchMode === 'players' ? isSearchingUsers : isSearchingNavGames) ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                  </button>
+                  </form>
+                  {navSearchMode === 'players' && (userSearchQuery && (userSearchResults.length > 0 || userSearchError)) && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-80">
+                    {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
+                    <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
+                      {userSearchResults.map(res => (
+                        <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
+                          <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
+                            <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
+                              {res.privacy === 'invite_only' && <Lock size={10} />}
+                              {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
+                            </div>
+                          </div>
+                          <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
+                            <Users size={14} />
+                          </button>
+                          <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
+                            <UserPlus size={14} />
+                          </button>
+                        </div>
+                      ))}
+                      {userSearchResults.length === 0 && !userSearchError && (
+                        <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
+                      )}
+                    </div>
+                    </div>
+                  )}
+                  {navSearchMode === 'games' && navGameHasSearched && (userSearchQuery && (navGameResults.length > 0 || navGameError || (!isSearchingNavGames && navGameResults.length === 0))) && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-[28rem]">
+                    {navGameError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{navGameError}</div>}
+                    <div className="divide-y divide-[var(--border)] max-h-72 overflow-y-auto custom-scrollbar">
+                      {navGameResults.map(g => {
+                        const mapped = gameFromRaw(g);
+                        const existingId = findExistingGameIdByTitle(data, mapped.title);
+                        const alreadyOnBoard = !!existingId;
+                        return (
+                          <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] transition-colors">
+                            <div
+                              className="w-12 h-12 rounded bg-[var(--panel-muted)] border border-[var(--border)] flex-shrink-0 overflow-hidden"
+                              style={{ backgroundImage: mapped.cover ? `url(${mapped.cover})` : PLACEHOLDER_COVERS[(mapped.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-[var(--text)] truncate">{mapped.title}</div>
+                              <div className="text-[11px] text-[var(--text-muted)] truncate">
+                                {(mapped.year || '').toString()} {mapped.year ? '·' : ''} {mapped.platform}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleBrowseListAction(g)}
+                              className={`text-xs px-3 py-1.5 rounded font-semibold ${alreadyOnBoard ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]'}`}
+                              disabled={alreadyOnBoard}
+                            >
+                              {alreadyOnBoard ? 'On board' : 'Add'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!isSearchingNavGames && navGameResults.length === 0 && !navGameError && (
+                        <div className="p-3 text-xs text-[var(--text-muted)]">No games found.</div>
+                      )}
+                    </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => { setNavSearchMode('games'); setUserSearchResults([]); setUserSearchError(null); }}
+                    className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'games' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
+                  >
+                    Games
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setNavSearchMode('players'); setNavGameResults([]); setNavGameError(null); setNavGameHasSearched(false); }}
+                    className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'players' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
+                  >
+                    Users
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+             {!isDataLoading && (
+               <button
+                 onClick={toggleTheme}
+                 className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                 title={theme === 'dark' ? "Switch to light mode" : "Switch to dark mode"}
+               >
+                 {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+               </button>
+             )}
+             {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
+            {!showLanding && !isDataLoading && !isFavoritesView && (
+              <button
+                onClick={() => setIsListView(!isListView)}
+                className={`p-2 rounded-full transition-colors ${isListView ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                title={isListView ? "Grid view" : "List view"}
+               >
+                 <List size={18} />
+               </button>
+             )}
+            {!showLanding && !isDataLoading && !isFavoritesView && (
+              <button
+                onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
+                className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                title="Playlists"
+              >
+                <LayoutGrid size={18} />
+              </button>
+            )}
+            {!isDataLoading && (
+              <button
+                onClick={() => { setIsBrowseGamesModalOpen(true); browseTopGames(); }}
+                className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                title="Browse games"
+              >
+                <Search size={18} />
+              </button>
+            )}
+            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
+            {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
+         </div>
+        </div>
       </nav>
 
       {/* Onboarding Modal (Forced Privacy Selection) */}
