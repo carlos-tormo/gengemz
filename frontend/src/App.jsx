@@ -104,6 +104,7 @@ export default function App() {
   const [navGameError, setNavGameError] = useState(null);
   const [isSearchingNavGames, setIsSearchingNavGames] = useState(false);
   const [navGameHasSearched, setNavGameHasSearched] = useState(false);
+  const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
   const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
@@ -128,12 +129,14 @@ export default function App() {
   const publicBrowsePlaylists = playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private');
   const [isBrowseGamesModalOpen, setIsBrowseGamesModalOpen] = useState(false);
   const [browseGamesResults, setBrowseGamesResults] = useState([]);
-  const [browseFilters, setBrowseFilters] = useState({ ordering: '-metacritic', page_size: 50, platformId: '', startDate: '', endDate: '' });
+  const [browseFilters, setBrowseFilters] = useState({ ordering: '-metacritic', page_size: 50, platformId: '', startDate: '', endDate: '', genreId: '', minRating: 0, year: '' });
   const [isBrowsingGames, setIsBrowsingGames] = useState(false);
   const [browseGamesError, setBrowseGamesError] = useState(null);
   const [browseMenuGameId, setBrowseMenuGameId] = useState(null);
   const [browseMenuPos, setBrowseMenuPos] = useState(null);
   const [browseMenuGame, setBrowseMenuGame] = useState(null);
+  const [browseSearch, setBrowseSearch] = useState('');
+  const [isBrowsePage, setIsBrowsePage] = useState(false);
   const [isPlaylistAddOpen, setIsPlaylistAddOpen] = useState(false);
   const [hoveredPlaylistItemIdx, setHoveredPlaylistItemIdx] = useState(null);
   const [selectedPlaylistItemIdx, setSelectedPlaylistItemIdx] = useState(null);
@@ -151,6 +154,7 @@ export default function App() {
   const userSearchRef = useRef(null);
   const moveMenuRef = useRef(null);
   const playlistMenuRef = useRef(null);
+  const desktopSearchRef = useRef(null);
   const mobileMenuRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
@@ -192,6 +196,7 @@ export default function App() {
   });
   useClickOutside(moveMenuRef, () => setIsMoveMenuOpen(false));
   useClickOutside(playlistMenuRef, () => { setIsPlaylistMenuOpen(false); setIsPlaylistSelectorOpen(false); });
+  useClickOutside(desktopSearchRef, () => setIsSearchBarOpen(false));
   useClickOutside(mobileMenuRef, () => setIsMobileMenuOpen(false));
 
   // Load playlists (public)
@@ -784,13 +789,16 @@ export default function App() {
       params.append('ordering', browseFilters.ordering || '-metacritic');
       params.append('page_size', browseFilters.page_size || 50);
       if (browseFilters.platformId) params.append('platforms', browseFilters.platformId);
-      const datesStr = [browseFilters.startDate, browseFilters.endDate].filter(v => v).join(',');
+      const startDate = browseFilters.year ? `${browseFilters.year}-01-01` : browseFilters.startDate;
+      const endDate = browseFilters.year ? `${browseFilters.year}-12-31` : browseFilters.endDate;
+      const datesStr = [startDate, endDate].filter(v => v).join(',');
       if (datesStr) params.append('dates', datesStr);
+      if (browseSearch) params.append('search', browseSearch);
       const res = await fetch(`${BACKEND_URL}?${params.toString()}`);
       if (!res.ok) throw new Error("Browse failed");
       const d = await res.json();
       const now = new Date();
-      const deduped = [];
+      let deduped = [];
       const seen = new Set();
       (d.results || []).forEach(g => {
         if (!g) return;
@@ -803,6 +811,17 @@ export default function App() {
         seen.add(key);
         deduped.push(g);
       });
+      // Client-side filters
+      if (browseFilters.minRating) {
+        deduped = deduped.filter(g => (g.rating || 0) >= browseFilters.minRating);
+      }
+      if (browseFilters.genreId) {
+        const gnorm = browseFilters.genreId.toString();
+        deduped = deduped.filter(g => (g.genres || []).some(gen => gen.id?.toString() === gnorm || gen.slug === gnorm));
+      }
+      if (browseFilters.year) {
+        deduped = deduped.filter(g => (g.released || '').startsWith(browseFilters.year.toString()));
+      }
       setBrowseGamesResults(deduped);
     } catch (err) {
       console.error("Browse games failed", err);
@@ -1221,117 +1240,13 @@ export default function App() {
               className="h-8 w-auto"
             />
             <span className="sr-only">Gengemz</span>
-            {!showLanding && (
-              <div className="hidden md:flex items-center gap-3 ml-6" ref={userSearchRef}>
-                <div className="relative">
-                  <form onSubmit={handleUserSearch} className="relative">
-                    <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-purple-400" size={16} />
-                    <input 
-                      type="text" 
-                      placeholder={navSearchMode === 'players' ? "Find players..." : "Find games..."}
-                      value={userSearchQuery}
-                    onChange={(e) => { 
-                      const val = e.target.value;
-                      setUserSearchQuery(val); 
-                      if (!val.trim()) { 
-                        setUserSearchResults([]); 
-                        setUserSearchError(null); 
-                        setNavGameResults([]); 
-                        setNavGameError(null); 
-                        setNavGameHasSearched(false); 
-                      }
-                    }}
-                    className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:w-64 w-48 transition-all outline-none placeholder:text-[var(--text-muted)]"
-                  />
-                  <button 
-                    type="submit"
-                    className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
-                  >
-                    {(navSearchMode === 'players' ? isSearchingUsers : isSearchingNavGames) ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                  </button>
-                  </form>
-                  {navSearchMode === 'players' && (userSearchQuery && (userSearchResults.length > 0 || userSearchError)) && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-80">
-                    {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
-                    <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
-                      {userSearchResults.map(res => (
-                        <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
-                          <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
-                            <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
-                              {res.privacy === 'invite_only' && <Lock size={10} />}
-                              {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
-                            </div>
-                          </div>
-                          <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
-                            <Users size={14} />
-                          </button>
-                          <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
-                            <UserPlus size={14} />
-                          </button>
-                        </div>
-                      ))}
-                      {userSearchResults.length === 0 && !userSearchError && (
-                        <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
-                      )}
-                    </div>
-                    </div>
-                  )}
-                  {navSearchMode === 'games' && navGameHasSearched && (userSearchQuery && (navGameResults.length > 0 || navGameError || (!isSearchingNavGames && navGameResults.length === 0))) && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 w-[28rem]">
-                    {navGameError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{navGameError}</div>}
-                    <div className="divide-y divide-[var(--border)] max-h-72 overflow-y-auto custom-scrollbar">
-                      {navGameResults.map(g => {
-                        const mapped = gameFromRaw(g);
-                        const existingId = findExistingGameIdByTitle(data, mapped.title);
-                        const alreadyOnBoard = !!existingId;
-                        return (
-                          <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] transition-colors">
-                            <div
-                              className="w-12 h-12 rounded bg-[var(--panel-muted)] border border-[var(--border)] flex-shrink-0 overflow-hidden"
-                              style={{ backgroundImage: mapped.cover ? `url(${mapped.cover})` : PLACEHOLDER_COVERS[(mapped.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">{mapped.title}</div>
-                              <div className="text-[11px] text-[var(--text-muted)] truncate">
-                                {(mapped.year || '').toString()} {mapped.year ? '·' : ''} {mapped.platform}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleBrowseListAction(g)}
-                              className={`text-xs px-3 py-1.5 rounded font-semibold ${alreadyOnBoard ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]'}`}
-                              disabled={alreadyOnBoard}
-                            >
-                              {alreadyOnBoard ? 'On board' : 'Add'}
-                            </button>
-                          </div>
-                        );
-                      })}
-                      {!isSearchingNavGames && navGameResults.length === 0 && !navGameError && (
-                        <div className="p-3 text-xs text-[var(--text-muted)]">No games found.</div>
-                      )}
-                    </div>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setNavSearchMode('games'); setUserSearchResults([]); setUserSearchError(null); }}
-                    className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'games' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
-                  >
-                    Games
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setNavSearchMode('players'); setNavGameResults([]); setNavGameError(null); setNavGameHasSearched(false); }}
-                    className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'players' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
-                  >
-                    Users
-                  </button>
-                </div>
-              </div>
+            {!isDataLoading && (
+              <button
+                onClick={() => { setIsBrowsePage(true); browseTopGames(); }}
+                className="px-3 py-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] font-semibold text-sm"
+              >
+                Browse Games
+              </button>
             )}
           </div>
           <div className="flex items-center gap-4">
@@ -1363,14 +1278,126 @@ export default function App() {
                 <LayoutGrid size={18} />
               </button>
             )}
-            {!isDataLoading && (
-              <button
-                onClick={() => { setIsBrowseGamesModalOpen(true); browseTopGames(); }}
-                className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                title="Browse games"
-              >
-                <Search size={18} />
-              </button>
+            {!showLanding && (
+              <div className="relative" ref={desktopSearchRef}>
+                <button
+                  onClick={() => setIsSearchBarOpen((v) => !v)}
+                  className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                  title="Search players/games"
+                >
+                  <Search size={18} />
+                </button>
+                {isSearchBarOpen && (
+                  <div className="absolute right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl p-3 w-80 z-50">
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => { setNavSearchMode('games'); setUserSearchResults([]); setUserSearchError(null); }}
+                        className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'games' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
+                      >
+                        Games
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setNavSearchMode('players'); setNavGameResults([]); setNavGameError(null); setNavGameHasSearched(false); }}
+                        className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'players' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
+                      >
+                        Users
+                      </button>
+                    </div>
+                    <form onSubmit={handleUserSearch} className="relative">
+                      <Search className="absolute left-3 top-2.5 text-slate-500" size={16} />
+                      <input 
+                        type="text" 
+                        placeholder={navSearchMode === 'players' ? "Find players..." : "Find games..."}
+                        value={userSearchQuery}
+                      onChange={(e) => { 
+                        const val = e.target.value;
+                        setUserSearchQuery(val); 
+                        if (!val.trim()) { 
+                          setUserSearchResults([]); 
+                          setUserSearchError(null); 
+                          setNavGameResults([]); 
+                          setNavGameError(null); 
+                          setNavGameHasSearched(false); 
+                        }
+                      }}
+                      className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] w-full outline-none placeholder:text-[var(--text-muted)]"
+                    />
+                    <button 
+                      type="submit"
+                      className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
+                    >
+                      {(navSearchMode === 'players' ? isSearchingUsers : isSearchingNavGames) ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                    </button>
+                    </form>
+                    {navSearchMode === 'players' && (userSearchQuery && (userSearchResults.length > 0 || userSearchError)) && (
+                      <div className="mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden">
+                      {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
+                      <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
+                        {userSearchResults.map(res => (
+                          <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
+                            <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
+                              <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
+                                {res.privacy === 'invite_only' && <Lock size={10} />}
+                                {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
+                              </div>
+                            </div>
+                            <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
+                              <Users size={14} />
+                            </button>
+                            <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
+                              <UserPlus size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        {userSearchResults.length === 0 && !userSearchError && (
+                          <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
+                        )}
+                      </div>
+                      </div>
+                    )}
+                    {navSearchMode === 'games' && navGameHasSearched && (userSearchQuery && (navGameResults.length > 0 || navGameError || (!isSearchingNavGames && navGameResults.length === 0))) && (
+                      <div className="mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden">
+                      {navGameError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{navGameError}</div>}
+                      <div className="divide-y divide-[var(--border)] max-h-72 overflow-y-auto custom-scrollbar">
+                        {navGameResults.map(g => {
+                          const mapped = gameFromRaw(g);
+                          const existingId = findExistingGameIdByTitle(data, mapped.title);
+                          const alreadyOnBoard = !!existingId;
+                          return (
+                            <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] transition-colors">
+                              <div
+                                className="w-12 h-12 rounded bg-[var(--panel-muted)] border border-[var(--border)] flex-shrink-0 overflow-hidden"
+                                style={{ backgroundImage: mapped.cover ? `url(${mapped.cover})` : PLACEHOLDER_COVERS[(mapped.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-[var(--text)] truncate">{mapped.title}</div>
+                                <div className="text-[11px] text-[var(--text-muted)] truncate">
+                                  {(mapped.year || '').toString()} {mapped.year ? '·' : ''} {mapped.platform}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleBrowseListAction(g)}
+                                className={`text-xs px-3 py-1.5 rounded font-semibold ${alreadyOnBoard ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]'}`}
+                                disabled={alreadyOnBoard}
+                              >
+                                {alreadyOnBoard ? 'On board' : 'Add'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {!isSearchingNavGames && navGameResults.length === 0 && !navGameError && (
+                          <div className="p-3 text-xs text-[var(--text-muted)]">No games found.</div>
+                        )}
+                      </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
             {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
@@ -1423,167 +1450,7 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* Browse Games Modal */}
-      <Modal
-        isOpen={isBrowseGamesModalOpen}
-        onClose={() => setIsBrowseGamesModalOpen(false)}
-        title="Browse games (RAWG.io)"
-        contentClassName="max-w-5xl w-full h-[80vh]"
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--text-muted)]">Data sourced from RAWG.io. Results are limited to top-rated games.</p>
-          <div className="text-[11px] text-[var(--text-muted)]">Filters</div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-            <div>
-              <label className="text-[11px] uppercase text-[var(--text-muted)]">Ordering</label>
-              <select
-                value={browseFilters.ordering}
-                onChange={(e) => setBrowseFilters(prev => ({ ...prev, ordering: e.target.value }))}
-                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
-              >
-                <option value="-metacritic">Top rated (metacritic)</option>
-                <option value="-rating">Top rated (user)</option>
-                <option value="-released">Newest</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] uppercase text-[var(--text-muted)]">Platform</label>
-              <select
-                value={browseFilters.platformId}
-                onChange={(e) => setBrowseFilters(prev => ({ ...prev, platformId: e.target.value }))}
-                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
-              >
-                <option value="">All platforms</option>
-                <option value="4">PC</option>
-                <option value="187">PlayStation 5</option>
-                <option value="18">PlayStation 4</option>
-                <option value="1">Xbox One</option>
-                <option value="186">Xbox Series X/S</option>
-                <option value="7">Nintendo Switch</option>
-                <option value="3">iOS</option>
-                <option value="21">Android</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] uppercase text-[var(--text-muted)]">Start date</label>
-              <input
-                type="date"
-                value={browseFilters.startDate}
-                onChange={(e) => setBrowseFilters(prev => ({ ...prev, startDate: e.target.value }))}
-                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] uppercase text-[var(--text-muted)]">End date</label>
-              <input
-                type="date"
-                value={browseFilters.endDate}
-                onChange={(e) => setBrowseFilters(prev => ({ ...prev, endDate: e.target.value }))}
-                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)]"
-              />
-            </div>
-            <div className="md:col-span-4 flex justify-end gap-2">
-              <button
-                onClick={browseTopGames}
-                disabled={isBrowsingGames}
-                className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm rounded disabled:opacity-60"
-              >
-                {isBrowsingGames ? 'Loading...' : 'Refresh'}
-              </button>
-            </div>
-          </div>
-
-          {browseGamesError && <div className="text-xs text-red-600 bg-red-100 border border-red-200 rounded p-2">{browseGamesError}</div>}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[50vh] overflow-y-auto custom-scrollbar">
-            {browseGamesResults.map(game => {
-              const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
-              const playlistMatches = myPlaylists.filter(pl => (pl.items || []).some(item => item.title?.toLowerCase() === game.name.toLowerCase()));
-              const hasMatches = boardMatches.length > 0 || playlistMatches.length > 0;
-              return (
-                <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm relative">
-                  <div className="p-2 absolute inset-0 flex items-end justify-end pointer-events-none">
-                    <button
-                      className="pointer-events-auto bg-[var(--panel)]/80 text-[var(--text)] border border-[var(--border)] rounded-full p-2 shadow"
-                      onClick={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setBrowseMenuPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX - 160 });
-                        setBrowseMenuGameId(game.id);
-                        setBrowseMenuGame(game);
-                      }}
-                      title="Add to..."
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  <div
-                    className="aspect-[3/4] bg-cover bg-center cursor-pointer"
-                    style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setBrowseMenuPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
-                      setBrowseMenuGameId(game.id);
-                      setBrowseMenuGame(game);
-                    }}
-                  >
-                    {!game.background_image && <div className="w-full h-full flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>}
-                    {hasMatches && (
-                      <div
-                        className="absolute top-2 left-2 px-2 py-1 rounded bg-black/50 text-white text-xs flex items-center gap-1"
-                        title={`On ${boardMatches.length} list(s), ${playlistMatches.length} playlist(s)`}
-                      >
-                        <Check size={12} />
-                        On your library
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-2 space-y-1">
-                    <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">{game.released ? game.released.split('-')[0] : 'Unknown'}</div>
-                    <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
-                      {game.metacritic && <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>}
-                      {game.rating && <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">⭐ {game.rating}</span>}
-                    </div>
-                  </div>
-                  {browseMenuGameId === game.id && browseMenuPos && (
-                    <div
-                      className="fixed bg-[var(--panel)] border border-[var(--border)] rounded-lg shadow-xl z-50 w-60 overflow-hidden"
-                      style={{ top: browseMenuPos.top, left: browseMenuPos.left }}
-                    >
-                    <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to board list</div>
-                      {data.columnOrder.map(cid => (
-                        <button
-                          key={cid}
-                          onClick={() => handleBrowseListAction(game, cid)}
-                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex justify-between"
-                        >
-                          {data.columns[cid].title}
-                          {boardMatches.includes(cid) && <Check size={12} className="text-green-500" />}
-                        </button>
-                      ))}
-                      <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to playlist</div>
-                      {myPlaylists.length > 0 ? myPlaylists.map(pl => (
-                        <button
-                          key={pl.id}
-                          onClick={() => handleBrowsePlaylistAction(game, pl)}
-                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] flex justify-between"
-                        >
-                          {pl.title}
-                          {playlistMatches.find(pm => pm.id === pl.id) && <Check size={12} className="text-green-500" />}
-                        </button>
-                      )) : (
-                        <div className="px-3 py-2 text-sm text-[var(--text-muted)]">No playlists</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {!isBrowsingGames && browseGamesResults.length === 0 && (
-              <div className="text-sm text-[var(--text-muted)] col-span-full">No games to display.</div>
-            )}
-          </div>
-        </div>
-      </Modal>
+      {/* Browse Games Page Section */}
       <Modal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} title="Settings & Privacy">
         <form onSubmit={handleUpdateProfile} className="space-y-6">
           <div>
@@ -1628,7 +1495,7 @@ export default function App() {
         </form>
       </Modal>
 
-      {!showLanding && !isDataLoading && !zoomedColumnId && !isFavoritesView && platforms.length > 1 && (
+      {!showLanding && !isDataLoading && !zoomedColumnId && !isFavoritesView && !isBrowsePage && platforms.length > 1 && (
         <div className="fixed top-16 left-0 right-0 h-12 bg-[var(--glass)] backdrop-blur border-b border-[var(--border)] z-30 flex items-center justify-center px-4 overflow-x-auto">
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
             <Filter size={14} className="text-[var(--text-muted)] mr-2 shrink-0" />
@@ -1642,9 +1509,233 @@ export default function App() {
         </div>
       )}
 
-      <main className={`pt-32 pb-10 px-4 md:px-8 h-screen overflow-x-hidden ${showLanding || isFavoritesView ? 'pt-24' : ''} ${zoomedColumnId ? 'pt-24' : ''}`}>
+      <main className={`pb-10 px-4 md:px-8 min-h-screen overflow-x-hidden ${showLanding || isFavoritesView ? 'pt-24' : 'pt-32'} ${zoomedColumnId ? 'pt-24' : ''} ${isBrowsePage ? 'pt-28' : ''}`}>
         {isDataLoading ? (
           <div className="h-full flex items-center justify-center animate-in fade-in"><Loader2 size={40} className="animate-spin text-purple-600" /></div>
+        ) : isBrowsePage ? (
+          <div className="max-w-6xl w-full mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-[var(--text)]">Browse Games</h2>
+              <button onClick={() => setIsBrowsePage(false)} className="text-sm text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1">
+                <ArrowLeft size={16} /> Back to board
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 bg-[var(--panel)] border border-[var(--border)] rounded-lg px-3 py-2">
+                <span className="text-[11px] uppercase text-[var(--text-muted)]">Browse by</span>
+                <select
+                  value={browseFilters.year}
+                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, year: e.target.value }))}
+                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
+                >
+                  <option value="">Any year</option>
+                  {Array.from({ length: 35 }, (_, i) => 2025 - i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <select
+                  value={browseFilters.minRating}
+                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, minRating: Number(e.target.value) }))}
+                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
+                >
+                  <option value={0}>Any rating</option>
+                  <option value={9}>9+</option>
+                  <option value={8}>8+</option>
+                  <option value={7}>7+</option>
+                  <option value={6}>6+</option>
+                </select>
+                <select
+                  value={browseFilters.ordering}
+                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, ordering: e.target.value }))}
+                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
+                >
+                  <option value="-metacritic">Popular (Metacritic)</option>
+                  <option value="-rating">Popular (User)</option>
+                  <option value="-added">Most added</option>
+                  <option value="-released">Newest</option>
+                </select>
+                <select
+                  value={browseFilters.genreId}
+                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, genreId: e.target.value }))}
+                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
+                >
+                  <option value="">All genres</option>
+                  <option value="4">Action</option>
+                  <option value="3">Adventure</option>
+                  <option value="5">RPG</option>
+                  <option value="2">Shooter</option>
+                  <option value="7">Puzzle</option>
+                  <option value="14">Simulator</option>
+                </select>
+                <select
+                  value={browseFilters.platformId}
+                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, platformId: e.target.value }))}
+                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
+                >
+                  <option value="">All platforms</option>
+                  <option value="4">PC</option>
+                  <option value="187">PlayStation 5</option>
+                  <option value="18">PlayStation 4</option>
+                  <option value="1">Xbox One</option>
+                  <option value="186">Xbox Series X/S</option>
+                  <option value="7">Nintendo Switch</option>
+                </select>
+              </div>
+              <div className="flex-1 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={16} />
+                  <input
+                    value={browseSearch}
+                    onChange={(e) => setBrowseSearch(e.target.value)}
+                    placeholder="Find a game..."
+                    className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg pl-9 pr-3 py-2 text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+                  />
+                </div>
+                <button
+                  onClick={browseTopGames}
+                  disabled={isBrowsingGames}
+                  className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm rounded disabled:opacity-60"
+                >
+                  {isBrowsingGames ? 'Loading...' : 'Browse'}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide">Popular picks</h3>
+              {browseGamesError && <div className="text-xs text-red-500">{browseGamesError}</div>}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {browseGamesResults.slice(0,5).map((game) => {
+                const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
+                const exists = boardMatches.length > 0;
+                return (
+                  <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm flex flex-col">
+                    <div
+                      className="aspect-[2/3] bg-cover bg-center relative"
+                      style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                    >
+                      {!game.background_image && (
+                        <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>
+                      )}
+                      {exists && (
+                        <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/40 text-white text-[11px] flex items-center gap-1">
+                          <Check size={12} /> On your library
+                        </div>
+                      )}
+                      <button
+                        className="absolute top-2 right-2 p-1.5 bg-[var(--panel)]/80 text-[var(--text)] rounded-full border border-[var(--border)] hover:border-[var(--accent)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleBrowseListAction(game, data.columnOrder[0]);
+                        }}
+                        title="Add to board list"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                      <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
+                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-2">
+                        <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
+                        {game.metacritic && (
+                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>
+                        )}
+                        {game.rating && (
+                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)] flex items-center gap-1">
+                            <Star size={12} /> {game.rating.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        {exists ? (
+                          <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
+                            On board
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleBrowseListAction(game)}
+                            className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
+                          >
+                            Add
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-between mt-2">
+              <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide">More results</h3>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 flex-1 overflow-y-auto custom-scrollbar">
+              {browseGamesResults.slice(5).map((game) => {
+                const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
+                const exists = boardMatches.length > 0;
+                return (
+                  <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm flex flex-col">
+                    <div
+                      className="aspect-[2/3] bg-cover bg-center relative"
+                      style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                    >
+                      {!game.background_image && (
+                        <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>
+                      )}
+                      {exists && (
+                        <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/40 text-white text-[11px] flex items-center gap-1">
+                          <Check size={12} /> On your library
+                        </div>
+                      )}
+                      <button
+                        className="absolute top-2 right-2 p-1.5 bg-[var(--panel)]/80 text-[var(--text)] rounded-full border border-[var(--border)] hover:border-[var(--accent)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleBrowseListAction(game, data.columnOrder[0]);
+                        }}
+                        title="Add to board list"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                      <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
+                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-2">
+                        <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
+                        {game.metacritic && (
+                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>
+                        )}
+                        {game.rating && (
+                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)] flex items-center gap-1">
+                            <Star size={12} /> {game.rating.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        {exists ? (
+                          <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
+                            On board
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleBrowseListAction(game)}
+                            className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
+                          >
+                            Add
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!isBrowsingGames && browseGamesResults.length === 0 && (
+                <div className="text-sm text-[var(--text-muted)] col-span-full">No games to display.</div>
+              )}
+            </div>
+          </div>
         ) : showLanding ? (
           <LandingPage theme={theme} onStart={() => setIsAddModalOpen(true)} onLogin={handleLogin} />
         ) : isFavoritesView ? (
