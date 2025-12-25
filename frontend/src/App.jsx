@@ -80,6 +80,14 @@ export default function App() {
   const [isGameCardOpen, setIsGameCardOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const [isGameCardEditing, setIsGameCardEditing] = useState(false);
+  const [selectedGameDetail, setSelectedGameDetail] = useState(null);
+  const [isLoadingGameDetail, setIsLoadingGameDetail] = useState(false);
+  const [gameDetailError, setGameDetailError] = useState(null);
+  const [ratingHover, setRatingHover] = useState(null);
+  const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false);
+  const [isPlaylistMenuOpen, setIsPlaylistMenuOpen] = useState(false);
+  const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
+  const normalizeTitle = (t) => (t || '').trim().toLowerCase();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -141,6 +149,8 @@ export default function App() {
   const dataRef = useRef(INITIAL_DATA);
   const userRef = useRef(null);
   const userSearchRef = useRef(null);
+  const moveMenuRef = useRef(null);
+  const playlistMenuRef = useRef(null);
   const mobileMenuRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
@@ -180,6 +190,8 @@ export default function App() {
     setNavGameError(null);
     setNavGameHasSearched(false);
   });
+  useClickOutside(moveMenuRef, () => setIsMoveMenuOpen(false));
+  useClickOutside(playlistMenuRef, () => { setIsPlaylistMenuOpen(false); setIsPlaylistSelectorOpen(false); });
   useClickOutside(mobileMenuRef, () => setIsMobileMenuOpen(false));
 
   // Load playlists (public)
@@ -588,6 +600,7 @@ export default function App() {
         }
       }
     }));
+    cleanGameDuplicates(newId, item.title, target);
   };
 
   const playlistItemFromGame = (game) => ({
@@ -619,6 +632,7 @@ export default function App() {
     const target = targetColId || data.columnOrder[0];
     const gameData = gameFromRaw(rawGame);
     const existingId = findExistingGameIdByTitle(data, gameData.title);
+    let finalId = existingId;
     if (existingId) {
       const currentCol = getGameColumnId(data, existingId);
       if (currentCol === target) {
@@ -640,6 +654,7 @@ export default function App() {
       }
     } else {
       const newId = `g${Date.now()}`;
+      finalId = newId;
       save(prev => ({
         ...prev,
         games: {
@@ -652,6 +667,7 @@ export default function App() {
         }
       }));
     }
+    cleanGameDuplicates(finalId || gameData.id || `temp`, gameData.title, target);
     setBrowseMenuGameId(null);
     setBrowseMenuGame(null);
   };
@@ -828,13 +844,39 @@ export default function App() {
         } 
       };
     });
+    cleanGameDuplicates(newId, g.name, target);
     
     setIsAddModalOpen(false); 
     setSearchQuery(''); 
     setSearchResults([]); 
   };
 
-  const openGameCard = (g, edit) => { setSelectedGame({ ...g }); setIsGameCardEditing(edit); setIsGameCardOpen(true); };
+  const fetchGameDetail = async (title) => {
+    if (!title) return;
+    setIsLoadingGameDetail(true);
+    setGameDetailError(null);
+    try {
+      await fetchGamesWithVariants(title, {
+        onResults: (res) => setSelectedGameDetail(res?.[0] || null),
+        onError: setGameDetailError,
+        setLoading: () => {}
+      });
+    } catch (err) {
+      console.error('Detail fetch failed', err);
+      setGameDetailError('Failed to load details');
+    } finally {
+      setIsLoadingGameDetail(false);
+    }
+  };
+
+  const openGameCard = (g, edit) => {
+    const mapped = g?.background_image ? gameFromRaw(g) : { ...g };
+    setSelectedGame(mapped);
+    setSelectedGameDetail(null);
+    setIsGameCardEditing(edit);
+    setIsGameCardOpen(true);
+    fetchGameDetail(mapped?.title);
+  };
   
   const handleSaveGameCard = (e) => { 
     e.preventDefault(); 
@@ -845,9 +887,11 @@ export default function App() {
   
   const handleModalFavoriteToggle = () => { 
     if (!selectedGame) return; 
-    const s = !selectedGame.isFavorite; 
-    setSelectedGame(p => ({ ...p, isFavorite: s })); 
-    save(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: { ...prev.games[selectedGame.id], isFavorite: s } } })); 
+    const targetId = ensureGameOnBoard(selectedGame); 
+    const s = !(selectedGame.isFavorite); 
+    setSelectedGame(p => ({ ...p, isFavorite: s, id: targetId || p?.id })); 
+    if (!targetId) return;
+    save(prev => ({ ...prev, games: { ...prev.games, [targetId]: { ...prev.games[targetId], isFavorite: s } } })); 
   };
 
   const onDragStart = (e, id, c) => { setIsDragging(true); setDraggedItem({ gameId: id, sourceColId: c }); }; const onDragOver = (e, c) => { e.preventDefault(); if (activeDropZone !== c) setActiveDropZone(c); }; 
@@ -869,6 +913,7 @@ export default function App() {
         } 
       };
     });
+    cleanGameDuplicates(gameId, data.games[gameId]?.title, d);
   };
 
   const handleManualMove = (id, d) => { 
@@ -886,6 +931,119 @@ export default function App() {
         } 
       };
     });
+    cleanGameDuplicates(id, data.games[id]?.title, d);
+  };
+
+  const ensureGameOnBoard = (game, targetColId = data.columnOrder[0]) => {
+    if (!game) return null;
+    const existingId = game.id && data.games[game.id] ? game.id : findExistingGameIdByTitle(data, game.title);
+    if (existingId) return existingId;
+    const newId = `g${Date.now()}`;
+    const target = targetColId || data.columnOrder[0];
+    save(prev => ({
+      ...prev,
+      games: {
+        ...prev.games,
+        [newId]: { ...game, id: newId }
+      },
+      columns: {
+        ...prev.columns,
+        [target]: { ...prev.columns[target], itemIds: [newId, ...prev.columns[target].itemIds] }
+      }
+    }));
+    setSelectedGame(s => s ? { ...s, id: newId } : s);
+    cleanGameDuplicates(newId, game.title, target);
+    return newId;
+  };
+
+  const handleSetGameRating = (val) => {
+    if (!selectedGame) return;
+    const targetId = ensureGameOnBoard(selectedGame);
+    if (!targetId) return;
+    setSelectedGame(prev => prev ? { ...prev, rating: val } : prev);
+    save(prev => ({
+      ...prev,
+      games: {
+        ...prev.games,
+        [targetId]: { ...prev.games[targetId], rating: val }
+      }
+    }));
+    cleanGameDuplicates(targetId, selectedGame.title, getGameColumnId(data, targetId));
+  };
+
+  const handleGameCardMove = (colId) => {
+    if (!selectedGame || !colId) return;
+    const targetId = ensureGameOnBoard(selectedGame, colId);
+    handleManualMove(targetId, colId);
+  };
+
+  const findPlaylistForGame = (game) => {
+    if (!game) return null;
+    return myPlaylists.find(pl => (pl.items || []).some(it => it.title?.toLowerCase() === game.title?.toLowerCase()));
+  };
+
+  const cleanGameDuplicates = (gameId, title, targetColId = null) => {
+    const norm = normalizeTitle(title);
+    if (!norm || !gameId) return;
+    save(prev => {
+      let games = { ...prev.games };
+      let columns = { ...prev.columns };
+      const dupIds = Object.values(games)
+        .filter(g => normalizeTitle(g.title) === norm && g.id !== gameId)
+        .map(g => g.id);
+
+      dupIds.forEach(id => {
+        Object.keys(columns).forEach(cid => {
+          if (columns[cid].itemIds.includes(id)) {
+            columns[cid] = { ...columns[cid], itemIds: columns[cid].itemIds.filter(x => x !== id) };
+          }
+        });
+        delete games[id];
+      });
+
+      if (targetColId) {
+        Object.keys(columns).forEach(cid => {
+          if (cid !== targetColId && columns[cid].itemIds.includes(gameId)) {
+            columns[cid] = { ...columns[cid], itemIds: columns[cid].itemIds.filter(x => x !== gameId) };
+          }
+        });
+        if (!columns[targetColId].itemIds.includes(gameId)) {
+          columns[targetColId] = { ...columns[targetColId], itemIds: [gameId, ...columns[targetColId].itemIds] };
+        }
+      }
+
+      return { ...prev, games, columns };
+    });
+  };
+
+  const removeGameFromPlaylist = async (plId, game) => {
+    if (!plId || !game) return;
+    try {
+      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', plId);
+      const snap = await getDoc(plRef);
+      if (!snap.exists()) return;
+      const current = snap.data().items || [];
+      const updated = current.filter(it => it.title?.toLowerCase() !== game.title?.toLowerCase());
+      await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
+      setPlaylists(prev => prev.map(p => p.id === plId ? { ...p, items: updated } : p));
+    } catch (err) {
+      console.error('Remove from playlist failed', err);
+    }
+  };
+
+  const getRatingColor = (val) => {
+    if (val >= 7) return '#2ecc71';
+    if (val >= 4) return '#f1c40f';
+    return '#e74c3c';
+  };
+
+  const getScoreLabel = (val) => {
+    if (!val && val !== 0) return 'No score yet';
+    if (val >= 9) return 'Exceptional / Must-play';
+    if (val >= 7) return 'Great';
+    if (val >= 5) return 'Mixed';
+    if (val >= 3) return 'Weak';
+    return 'Dropped / Not enjoyable';
   };
 
   const handleDeleteGame = (id) => { 
@@ -1391,7 +1549,7 @@ export default function App() {
                       className="fixed bg-[var(--panel)] border border-[var(--border)] rounded-lg shadow-xl z-50 w-60 overflow-hidden"
                       style={{ top: browseMenuPos.top, left: browseMenuPos.left }}
                     >
-                      <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to list</div>
+                    <div className="px-3 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase border-b border-[var(--border)]">Add to board list</div>
                       {data.columnOrder.map(cid => (
                         <button
                           key={cid}
@@ -1602,31 +1760,163 @@ export default function App() {
         )}
       </main>
 
-      <Modal isOpen={isGameCardOpen} onClose={() => setIsGameCardOpen(false)} title="Your Game Card">
+      <Modal isOpen={isGameCardOpen} onClose={() => setIsGameCardOpen(false)} title="Game Card">
         {selectedGame && (
-          <form onSubmit={handleSaveGameCard} className="space-y-6">
-            <div className="flex gap-5">
-              <div className="w-32 h-44 rounded-xl shadow-2xl shrink-0 bg-cover bg-center border border-slate-700" style={{ background: selectedGame.cover ? `url(${selectedGame.cover}) center/cover` : PLACEHOLDER_COVERS[selectedGame.coverIndex % PLACEHOLDER_COVERS.length] }} />
-              <div className="flex-1 min-w-0 flex flex-col">
-                <div className="flex items-start justify-between"><h3 className="text-2xl font-bold text-white leading-tight mb-1">{selectedGame.title}</h3><button type="button" onClick={() => setIsGameCardEditing(!isGameCardEditing)} className={`p-2 rounded-lg transition-colors ${isGameCardEditing ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`} title={isGameCardEditing ? "Editing Mode Active" : "Click to Edit Details"}>{isGameCardEditing ? <Unlock size={18} /> : <Pencil size={18} />}</button></div>
-                <div className="flex items-center gap-2 text-slate-400 text-sm mb-4">{selectedGame.year && <span className="flex items-center gap-1"><Calendar size={14} /> {selectedGame.year}</span>}<span>•</span><span>{selectedGame.platform}</span></div>
-                <div className="flex gap-2 mt-auto">
-                  <button type="button" onClick={handleModalFavoriteToggle} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${selectedGame.isFavorite ? 'bg-red-500/10 border-red-500/50 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750'}`}><Heart size={16} className={selectedGame.isFavorite ? "fill-current" : ""} /><span className="text-sm font-medium">{selectedGame.isFavorite ? 'Favorite' : 'Not Favorite'}</span></button>
-                  <button type="button" onClick={() => setIsGameCardEditing(true)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${selectedGame.rating > 0 ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750'}`}><Star size={16} className={selectedGame.rating > 0 ? "fill-current" : ""} /><span className="text-sm font-bold">{selectedGame.rating || '--'} / 10</span></button>
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="w-32 h-44 rounded-xl shadow-2xl shrink-0 bg-cover bg-center border border-[var(--border)]" style={{ background: selectedGame.cover ? `url(${selectedGame.cover}) center/cover` : PLACEHOLDER_COVERS[selectedGame.coverIndex % PLACEHOLDER_COVERS.length] }} />
+              <div className="flex-1 min-w-0 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-2xl font-bold text-[var(--text)] leading-tight mb-1">{selectedGame.title}</h3>
+                    <div className="flex flex-wrap items-center gap-2 text-[var(--text-muted)] text-sm">
+                      {(selectedGame.year || selectedGameDetail?.released) && (
+                        <span className="flex items-center gap-1"><Calendar size={14} />{selectedGame.year || selectedGameDetail?.released?.split('-')?.[0]}</span>
+                      )}
+                      {(selectedGame.platform || selectedGameDetail?.platforms) && (
+                        <span>• {selectedGame.platform || selectedGameDetail?.platforms?.map(p => p.platform?.name).slice(0,3).join(', ')}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="relative" ref={playlistMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => { setIsPlaylistMenuOpen(v => !v); setIsPlaylistSelectorOpen(false); }}
+                      className="p-2 rounded-full border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--accent)]"
+                      aria-label="Playlist options"
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+                    {isPlaylistMenuOpen && (
+                      <div className="absolute right-0 mt-2 w-60 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden">
+                        <div className="divide-y divide-[var(--border)]">
+                          <button
+                            onClick={() => setIsPlaylistSelectorOpen(v => !v)}
+                            className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]"
+                          >
+                            {findPlaylistForGame(selectedGame) ? 'Change / Remove playlist' : 'Add to playlist'}
+                          </button>
+                          {isPlaylistSelectorOpen && (
+                            <div className="max-h-64 overflow-y-auto">
+                              {findPlaylistForGame(selectedGame) && (
+                                <button
+                                  onClick={() => { removeGameFromPlaylist(findPlaylistForGame(selectedGame)?.id, selectedGame); setIsPlaylistMenuOpen(false); setIsPlaylistSelectorOpen(false); }}
+                                  className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20"
+                                >
+                                  Remove from playlist
+                                </button>
+                              )}
+                              {(myPlaylists && myPlaylists.length > 0) ? (
+                                myPlaylists.map(pl => (
+                                  <button
+                                    key={pl.id}
+                                    onClick={() => { addGameToPlaylist(pl.id, selectedGame); setIsPlaylistMenuOpen(false); setIsPlaylistSelectorOpen(false); }}
+                                    className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] truncate"
+                                  >
+                                    {findPlaylistForGame(selectedGame)?.id === pl.id ? '✓ ' : ''}{pl.title}
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No playlists yet</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <button type="button" onClick={handleModalFavoriteToggle} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${selectedGame.isFavorite ? 'bg-red-500/10 border-red-500/50 text-red-400' : 'bg-[var(--panel)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'}`}><Heart size={16} className={selectedGame.isFavorite ? "fill-current" : ""} /><span className="text-sm font-medium">{selectedGame.isFavorite ? 'Favorite' : 'Not favorite'}</span></button>
+                  <div className="flex flex-col gap-1 bg-[var(--panel)] border border-[var(--border)] rounded-lg px-3 py-2 min-w-[220px]">
+                    <span className="text-[11px] uppercase text-[var(--text-muted)] tracking-wide">My Score</span>
+                    <div className="flex items-center gap-3">
+                      <div className="grid grid-cols-10 gap-1 flex-1">
+                        {[...Array(10).keys()].map(idx => {
+                          const val = idx + 1;
+                          const activeVal = ratingHover ?? selectedGame.rating;
+                          const color = getRatingColor(activeVal || val);
+                          const filled = activeVal >= val;
+                          return (
+                            <button
+                              key={val}
+                              onMouseEnter={() => setRatingHover(val)}
+                              onMouseLeave={() => setRatingHover(null)}
+                              onClick={() => handleSetGameRating(val)}
+                              className="h-4 flex items-center justify-center"
+                              aria-label={`Set score ${val}`}
+                            >
+                              <Star
+                                size={14}
+                                className={`${filled ? '' : 'text-[var(--text-muted)]'} transition-colors`}
+                                style={{ color: filled ? color : undefined, fill: filled ? color : 'none' }}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div
+                        className="px-3 h-9 rounded-md flex items-center justify-center text-sm font-bold text-white"
+                        style={{ backgroundColor: getRatingColor(selectedGame.rating || 0) }}
+                      >
+                        {selectedGame.rating || '--'}
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      {getScoreLabel(ratingHover ?? selectedGame.rating)}
+                    </div>
+                  </div>
+                  <div className="relative" ref={moveMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsMoveMenuOpen(v => !v)}
+                      className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 text-sm ${getGameColumnId(data, selectedGame.id) ? 'bg-[var(--accent)]/10 border-[var(--accent)] text-[var(--text)]' : 'bg-[var(--panel)] border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]'}`}
+                    >
+                      <Check size={16} className={`${getGameColumnId(data, selectedGame.id) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                      <span className="truncate">
+                        {getGameColumnId(data, selectedGame.id) ? data.columns[getGameColumnId(data, selectedGame.id)]?.title : 'Not on a board list'}
+                      </span>
+                    </button>
+                    {isMoveMenuOpen && (
+                      <div className="absolute mt-2 w-64 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden">
+                        <div className="text-[10px] font-semibold uppercase text-[var(--text-muted)] px-3 py-2 border-b border-[var(--border)]">Add to board list</div>
+                        <div className="divide-y divide-[var(--border)]">
+                          {data.columnOrder.map(cid => (
+                            <button
+                              key={cid}
+                              onClick={() => { handleGameCardMove(cid); setIsMoveMenuOpen(false); }}
+                              className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)]"
+                            >
+                              {data.columns[cid].title}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-            {isGameCardEditing && (
-              <div className="pt-4 border-t border-slate-800 animate-in fade-in slide-in-from-top-2">
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Platform</label><input type="text" value={selectedGame.platform} onChange={(e) => setSelectedGame({ ...selectedGame, platform: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Genre</label><input type="text" value={selectedGame.genre} onChange={(e) => setSelectedGame({ ...selectedGame, genre: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none" /></div>
-                </div>
-                <div className="mb-6"><div className="flex justify-between mb-2"><label className="block text-xs font-bold text-slate-500 uppercase">Rating Score</label><span className="text-sm font-mono text-purple-400">{selectedGame.rating} / 10</span></div><input type="range" min="0" max="10" value={selectedGame.rating || 0} onChange={(e) => setSelectedGame({ ...selectedGame, rating: parseInt(e.target.value) })} className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-600" /></div>
-                <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg shadow-purple-900/20 flex items-center justify-center gap-2"><Save size={18} /> Save Changes</button>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4 space-y-2">
+              <div className="text-sm text-[var(--text-muted)]">
+                {isLoadingGameDetail && 'Loading details...'}
+                {gameDetailError && <span className="text-red-400">{gameDetailError}</span>}
+                {!isLoadingGameDetail && !gameDetailError && (
+                  <div className="space-y-2">
+                    {selectedGameDetail?.description_raw ? (
+                      <p className="text-[var(--text)] text-sm line-clamp-4">{selectedGameDetail.description_raw}</p>
+                    ) : (
+                      <p className="text-[var(--text-muted)] text-sm">No additional description available.</p>
+                    )}
+                    <div className="flex flex-wrap gap-2 text-[11px] text-[var(--text-muted)]">
+                      {selectedGameDetail?.genres?.map(g => <span key={g.id} className="px-2 py-1 rounded bg-[var(--panel)] border border-[var(--border)]">{g.name}</span>)}
+                      {selectedGameDetail?.metacritic && <span className="px-2 py-1 rounded bg-[var(--panel)] border border-[var(--border)]">Metacritic: {selectedGameDetail.metacritic}</span>}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </form>
+            </div>
+          </div>
         )}
       </Modal>
 
@@ -1654,32 +1944,46 @@ export default function App() {
             </form>
           {searchError && <div className="p-3 bg-red-100 border border-red-200 rounded-lg text-red-700 text-sm">{searchError}</div>}
           <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
-            {searchResults.map(game => (
-              <button
-                key={game.id}
-                onClick={() => handleAddGameFromSearch(game)}
-                className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--panel-muted)] border border-transparent hover:border-[var(--accent)]/40 transition-all text-left group bg-[var(--panel)]"
-              >
+            {searchResults.map(game => {
+              const exists = findExistingGameIdByTitle(data, game.name);
+              return (
                 <div
-                  className="w-12 h-16 bg-[var(--panel-muted)] rounded shrink-0 bg-cover bg-center shadow-sm border border-[var(--border)]"
-                  style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                  key={game.id}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] hover:border-[var(--accent)]/60 transition-all"
                 >
-                  {!game.background_image && <ImageIcon className="w-full h-full p-3 text-[var(--text-muted)]" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-[var(--text)] group-hover:text-[var(--accent)] truncate">{game.name}</h4>
-                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
-                    {game.metacritic && (
-                      <span className={`px-1.5 rounded ${game.metacritic >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' : game.metacritic >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' : 'bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]'}`}>
-                        {game.metacritic}
-                      </span>
-                    )}
+                  <div
+                    className="w-12 h-16 bg-[var(--panel-muted)] rounded shrink-0 bg-cover bg-center shadow-sm border border-[var(--border)]"
+                    style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
+                  >
+                    {!game.background_image && <ImageIcon className="w-full h-full p-3 text-[var(--text-muted)]" />}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-[var(--text)] truncate">{game.name}</h4>
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                      <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
+                      {game.metacritic && (
+                        <span className={`px-1.5 rounded ${game.metacritic >= 75 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' : game.metacritic >= 50 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' : 'bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]'}`}>
+                          {game.metacritic}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {exists ? (
+                    <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
+                      On board
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleAddGameFromSearch(game)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold shadow"
+                    >
+                      <Plus size={14} />
+                      Add
+                    </button>
+                  )}
                 </div>
-                <Plus size={18} className="text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
-              </button>
-            ))}
+              );
+            })}
             {!isSearching && searchQuery.trim() && searchResults.length === 0 && (
               <div className="text-sm text-[var(--text-muted)] px-2 py-2">No results found.</div>
             )}
@@ -2030,7 +2334,12 @@ export default function App() {
                           <span className="text-xs text-[var(--text-muted)]">{idx + 1}</span>
                           <div className="w-10 h-10 rounded bg-[var(--panel)] border border-[var(--border)] overflow-hidden" style={{ backgroundImage: item.cover ? `url(${item.cover})` : PLACEHOLDER_COVERS[(item.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }} />
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-[var(--text)] truncate">{item.title}</div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openGameCard(item, false); }}
+                              className="text-sm font-semibold text-[var(--text)] truncate hover:text-[var(--accent)] text-left w-full"
+                            >
+                              {item.title}
+                            </button>
                             <div className="text-[11px] text-[var(--text-muted)] truncate">{item.year ? `${item.year} · ` : ''}{item.platform}</div>
                           </div>
                           <div className="text-xs text-[var(--text-muted)] truncate">{item.genre || '—'}</div>
@@ -2045,14 +2354,16 @@ export default function App() {
                               </button>
                             )}
                             {exists ? (
-                              <span className="text-[11px] px-2 py-1 rounded-full border border-green-400 text-green-700 dark:text-green-300 dark:border-green-600">On board</span>
+                              <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
+                                On board
+                              </span>
                             ) : (
                               <select
                                 onChange={(e) => addPlaylistItemToList(item, e.target.value)}
                                 defaultValue=""
                                 className="bg-[var(--panel)] border border-[var(--border)] text-[11px] text-[var(--text)] rounded px-2 py-1"
                               >
-                                <option value="" disabled>Add to list</option>
+                                <option value="" disabled>Add to board list</option>
                                 {data.columnOrder.map(cid => (
                                   <option key={cid} value={cid}>{data.columns[cid].title}</option>
                                 ))}
