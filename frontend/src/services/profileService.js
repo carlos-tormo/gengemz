@@ -146,6 +146,11 @@ export const searchPublicProfiles = async (searchQuery) => {
   return Array.from(byUid.values()).slice(0, 10);
 };
 
+export const getPublicProfile = async (uid) => {
+  const snapshot = await getDoc(publicProfileDoc(uid));
+  return snapshot.exists() ? { uid, ...snapshot.data() } : null;
+};
+
 export const loadProfileBoard = async (uid) => {
   const snapshot = await getDoc(userDataDoc(uid, 'board'));
   return snapshot.exists() ? snapshot.data() : null;

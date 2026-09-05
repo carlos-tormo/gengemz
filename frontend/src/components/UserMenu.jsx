@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
-import { LogIn, LogOut, Settings, Users, UserPlus, Edit2 } from 'lucide-react';
+import { LogIn, LogOut, Settings, Users, Edit2, User, Link as LinkIcon, Check } from 'lucide-react';
 import useClickOutside from '../hooks/useClickOutside';
 
-const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOpenFriends }) => {
+const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOpenFriends, onOpenMyProfile, onCopyProfileLink }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const menuRef = useRef(null);
   useClickOutside(menuRef, () => setIsOpen(false));
   if (!user) return null;
@@ -32,6 +33,8 @@ const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOp
             </div>
             <div className="p-2 flex flex-col gap-1">
               {!user.isAnonymous && <button onClick={() => { onOpenSettings(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><Settings size={16} /> Settings</button>}
+              {!user.isAnonymous && onOpenMyProfile && <button onClick={() => { onOpenMyProfile(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><User size={16} /> My profile</button>}
+              {!user.isAnonymous && onCopyProfileLink && <button onClick={async () => { await onCopyProfileLink(); setCopied(true); setTimeout(() => { setCopied(false); setIsOpen(false); }, 1200); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors">{copied ? <Check size={16} className="text-green-500" /> : <LinkIcon size={16} />} {copied ? 'Link copied' : 'Copy profile link'}</button>}
               {!user.isAnonymous && onOpenFriends && <button onClick={() => { onOpenFriends(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><Users size={16} /> Friends</button>}
               {user.isAnonymous ? <button onClick={() => { onLogin(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"><LogIn size={16} /> Sign In with Google</button> : <button onClick={() => { onLogout(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-lg transition-colors"><LogOut size={16} /> Sign Out</button>}
               {!user.isAnonymous && <button onClick={() => { onOpenProfile(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><Edit2 size={16} /> Edit Name</button>}

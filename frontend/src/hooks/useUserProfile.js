@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   createDebugProfiles,
+  getPublicProfile,
   loadProfileBoard,
   saveUserSettings,
   searchPublicProfiles,
@@ -43,6 +44,7 @@ const useUserProfile = (user) => {
     saveUserSettings: saveSettings,
     createDebugProfiles: seedDebugProfiles,
     searchPublicProfiles,
+    getPublicProfile,
     loadProfileBoard,
   };
 };

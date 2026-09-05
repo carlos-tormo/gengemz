@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate, useSearchParams, matchPath } from 'react-router';
 import {
   Plus, MoreVertical, Gamepad2, X, Trash2,
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
@@ -28,6 +29,7 @@ import LandingPage from './components/LandingPage';
 import BrowsePage from './components/BrowsePage';
 import SearchDropdown from './components/SearchDropdown';
 import BoardPage from './components/BoardPage';
+import ProfilePage from './components/ProfilePage';
 import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
 import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
 
@@ -65,13 +67,33 @@ export default function App() {
     saveUserSettings,
     createDebugProfiles: seedDebugProfiles,
     searchPublicProfiles,
+    getPublicProfile,
     loadProfileBoard,
   } = useUserProfile(user);
+
+  // --- URL state (react-router) ---
+  // Views live in the URL: / (board, ?view=list), /board/:columnId, /favorites,
+  // /browse, /playlists, /playlists/:id, /u/:uid.
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const zoomedColumnId = matchPath('/board/:columnId', pathname)?.params.columnId || null;
+  const isFavoritesView = pathname === '/favorites';
+  const isBrowsePage = pathname === '/browse';
+  const isListView = pathname === '/' && searchParams.get('view') === 'list';
+  const playlistsMatch = matchPath('/playlists/:id?', pathname);
+  const isPlaylistsModalOpen = !!playlistsMatch;
+  const routePlaylistId = playlistsMatch?.params.id || null;
+  const goToBoard = () => navigate('/');
+  const setZoomedColumnId = (colId) => navigate(colId ? `/board/${colId}` : '/');
+  const setIsFavoritesView = (on) => navigate(on ? '/favorites' : '/');
+  const setIsListView = (on) => navigate(on ? '/?view=list' : '/');
+  const openPlaylists = () => navigate('/playlists');
+  const openPlaylist = (id) => navigate(id ? `/playlists/${id}` : '/playlists');
+  const closePlaylists = () => navigate('/');
   
   // View State
   const [activePlatformFilter, setActivePlatformFilter] = useState('All');
-  const [zoomedColumnId, setZoomedColumnId] = useState(null); 
-  const [isFavoritesView, setIsFavoritesView] = useState(false);
   
   // Modals
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
@@ -105,28 +127,24 @@ export default function App() {
   const [userSearchError, setUserSearchError] = useState(null);
   const [navSearchMode, setNavSearchMode] = useState('games'); // 'players' | 'games'
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
-  const [selectedProfileBoardError, setSelectedProfileBoardError] = useState(null);
-  const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
   const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
-  const [isListView, setIsListView] = useState(false);
-  const [isPlaylistsModalOpen, setIsPlaylistsModalOpen] = useState(false);
-  const [isPlaylistDetailOpen, setIsPlaylistDetailOpen] = useState(false);
   const [isBrowsePlaylistsModalOpen, setIsBrowsePlaylistsModalOpen] = useState(false);
-  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
   const [duplicateTarget, setDuplicateTarget] = useState('');
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
   const { theme, toggleTheme } = useTheme();
-  const { myPlaylists, publicBrowsePlaylists, isSavingPlaylist, playlistActions } = usePlaylists(user);
+  const { playlists, myPlaylists, publicBrowsePlaylists, isSavingPlaylist, playlistActions } = usePlaylists(user);
+  const selectedPlaylist = useMemo(
+    () => (routePlaylistId ? playlists.find(pl => pl.id === routePlaylistId) || null : null),
+    [playlists, routePlaylistId],
+  );
+  const isPlaylistDetailOpen = !!selectedPlaylist;
   const [browseGamesResults, setBrowseGamesResults] = useState([]);
   const [browseFilters, setBrowseFilters] = useState({ ordering: '-metacritic', page_size: 50, platformId: '', startDate: '', endDate: '', genreId: '', minRating: 0, year: '' });
   const [isBrowsingGames, setIsBrowsingGames] = useState(false);
   const [browseGamesError, setBrowseGamesError] = useState(null);
   const [browseSearch, setBrowseSearch] = useState('');
-  const [isBrowsePage, setIsBrowsePage] = useState(false);
   const [isPlaylistAddOpen, setIsPlaylistAddOpen] = useState(false);
   const [hoveredPlaylistItemIdx, setHoveredPlaylistItemIdx] = useState(null);
   const [selectedPlaylistItemIdx, setSelectedPlaylistItemIdx] = useState(null);
@@ -180,10 +198,9 @@ export default function App() {
 
   useEffect(() => {
     if (selectedPlaylist && selectedPlaylist.ownerUid !== user?.uid && selectedPlaylist.privacy === 'private') {
-      setSelectedPlaylist(null);
-      setIsPlaylistDetailOpen(false);
+      navigate('/playlists', { replace: true });
     }
-  }, [selectedPlaylist, user]);
+  }, [selectedPlaylist, user, navigate]);
 
   // Legacy search click outside (desktop search now handled via desktopSearchRef)
   useClickOutside(moveMenuRef, () => setIsMoveMenuOpen(false));
@@ -192,11 +209,17 @@ export default function App() {
   useClickOutside(mobileMenuRef, () => setIsMobileMenuOpen(false));
 
   useEffect(() => {
-    if (isPlaylistsModalOpen && myPlaylists.length > 0 && !selectedPlaylist) {
-      setSelectedPlaylist(myPlaylists[0]);
-      setIsPlaylistDetailOpen(true);
+    if (isPlaylistsModalOpen && !routePlaylistId && myPlaylists.length > 0) {
+      navigate(`/playlists/${myPlaylists[0].id}`, { replace: true });
     }
-  }, [isPlaylistsModalOpen, myPlaylists, selectedPlaylist]);
+  }, [isPlaylistsModalOpen, routePlaylistId, myPlaylists, navigate]);
+
+  // A zoomed column that no longer exists (deleted, or a stale link) falls back to the board.
+  useEffect(() => {
+    if (zoomedColumnId && !isDataLoading && !data.columns?.[zoomedColumnId]) {
+      navigate('/', { replace: true });
+    }
+  }, [zoomedColumnId, isDataLoading, data.columns, navigate]);
 
   useEffect(() => {
     if (!isPlaylistsModalOpen) {
@@ -314,24 +337,21 @@ export default function App() {
     }
   };
 
-  const openProfile = async (profile) => {
-    setSelectedProfile(profile);
-    setSelectedProfileBoard(null);
-    setSelectedProfileBoardError(null);
-    setIsProfileViewOpen(true);
+  const openProfile = (profile) => {
+    const uid = typeof profile === 'string' ? profile : profile?.uid;
+    if (!uid) return;
+    setIsFriendsModalOpen(false);
+    setIsSearchBarOpen(false);
+    navigate(`/u/${uid}`);
+  };
+
+  const profileLink = (uid) => `${window.location.origin}/u/${uid}`;
+  const copyOwnProfileLink = async () => {
+    if (!user) return;
     try {
-      setSelectedProfileBoard(await loadProfileBoard(profile.uid));
-    } catch (err) {
-      if (err?.code === 'permission-denied') {
-        setSelectedProfileBoardError(
-          profile.privacy === 'invite_only'
-            ? 'This board is invite only. Send a follow request to see it once accepted.'
-            : 'You do not have access to this board.',
-        );
-      } else {
-        console.error("Failed to load profile board", err);
-        setSelectedProfileBoardError('Could not load this board.');
-      }
+      await navigator.clipboard.writeText(profileLink(user.uid));
+    } catch {
+      prompt('Copy this link', profileLink(user.uid));
     }
   };
 
@@ -372,9 +392,6 @@ export default function App() {
   const updatePlaylistFields = async (playlistId, fields) => {
     try {
       await playlistActions.updateFields(playlistId, fields);
-      if (selectedPlaylist?.id === playlistId) {
-        setSelectedPlaylist(prev => prev ? { ...prev, ...fields } : prev);
-      }
     } catch (err) {
       alert(err.message || "Failed to update playlist");
     }
@@ -401,8 +418,7 @@ export default function App() {
     const confirmed = confirm(`Remove "${target.title}" from ${pl.title}?`);
     if (!confirmed) return;
     try {
-      const updated = await playlistActions.removeItemAtIndex(pl, idx);
-      setSelectedPlaylist(prev => prev?.id === pl.id ? { ...prev, items: updated } : prev);
+      await playlistActions.removeItemAtIndex(pl, idx);
     } catch (err) {
       alert(err.message || "Failed to remove game");
     }
@@ -414,8 +430,7 @@ export default function App() {
     try {
       await playlistActions.removePlaylist(pl.id);
       if (selectedPlaylist?.id === pl.id) {
-        setSelectedPlaylist(null);
-        setIsPlaylistDetailOpen(false);
+        navigate('/playlists', { replace: true });
       }
     } catch (err) {
       alert(err.message || "Failed to delete playlist");
@@ -478,7 +493,6 @@ export default function App() {
         alert("Game already in playlist");
         return;
       }
-      setSelectedPlaylist(prev => prev?.id === playlistId ? { ...prev, items: result.items } : prev);
     } catch (err) {
       console.error("Add to playlist failed", err);
       alert(err.message || "Failed to add to playlist");
@@ -488,8 +502,7 @@ export default function App() {
   const createPlaceholderPlaylist = async (initialGame = null) => {
     try {
       const newPlaylist = await playlistActions.createPlaceholderPlaylist(initialGame);
-      setSelectedPlaylist(newPlaylist);
-      setIsPlaylistDetailOpen(true);
+      openPlaylist(newPlaylist.id);
       setOpenPlaylistMenuId(null);
     } catch (err) {
       alert(err.message || "Failed to create playlist");
@@ -520,6 +533,11 @@ export default function App() {
       setIsBrowsingGames(false);
     }
   };
+  useEffect(() => {
+    if (isBrowsePage) browseTopGames();
+    // browseTopGames reads the current filters; re-running on every filter change would double-fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBrowsePage]);
   
   const handleAddGameFromSearch = (g) => { 
     const existingId = findExistingGameId(data, g);
@@ -598,8 +616,7 @@ export default function App() {
   const removeGameFromPlaylist = async (plId, game) => {
     if (!plId || !game) return;
     try {
-      const updated = await playlistActions.removeGame(plId, game);
-      setSelectedPlaylist(prev => prev?.id === plId ? { ...prev, items: updated } : prev);
+      await playlistActions.removeGame(plId, game);
     } catch (err) {
       console.error('Remove from playlist failed', err);
     }
@@ -655,6 +672,42 @@ export default function App() {
 
   const platforms = getUniquePlatforms(data);
   const showLanding = !isAuthLoading && !isDataLoading && user?.isAnonymous && (!data.games || Object.keys(data.games).length === 0);
+  const boardElement = isDataLoading ? (
+    <div className="h-full flex items-center justify-center animate-in fade-in">
+      <Loader2 size={40} className="animate-spin text-purple-600" />
+    </div>
+  ) : showLanding ? (
+    <LandingPage
+      theme={theme}
+      onStart={() => setIsAddModalOpen(true)}
+      onLogin={handleLogin}
+    />
+  ) : (
+    <BoardPage
+      data={data}
+      favoriteGames={favoriteGames}
+      platforms={platforms}
+      hiddenGamesCount={hiddenGamesCount}
+      viewMode={{ isListView, isFavoritesView, zoomedColumnId: data.columns?.[zoomedColumnId] ? zoomedColumnId : null }}
+      setViewMode={{ setIsListView, setIsFavoritesView, setZoomedColumnId }}
+      filters={{ activePlatformFilter, setActivePlatformFilter }}
+      actions={{
+        handleManualMove,
+        handleDeleteGame,
+        openGameCard,
+        toggleFavorite,
+        onDragOver,
+        onDrop,
+        onDragStart,
+        activeDropZone,
+        openAddColumnModal,
+        openEditColumnModal,
+      }}
+      playlists={myPlaylists}
+      onAddToPlaylist={addGameToPlaylist}
+      onCreatePlaylistAndAdd={createPlaceholderPlaylist}
+    />
+  );
   return (
     <div className={`min-h-screen ${theme === 'light' ? 'theme-light' : 'theme-dark'} bg-[var(--bg)] text-[var(--text)] font-sans relative flex flex-col selection:bg-[var(--accent)] selection:text-[var(--panel)] transition-colors`}>
       <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 transition-opacity duration-300 ${saveStatus === 'idle' ? 'opacity-50 hover:opacity-100' : 'opacity-100'}`}>
@@ -696,9 +749,9 @@ export default function App() {
               {isMobileMenuOpen && (
                 <div className="absolute left-0 top-12 w-56 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden">
                   <div className="divide-y divide-[var(--border)] text-sm text-[var(--text)]">
-                    <button onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Playlists</button>
-                    <button onClick={() => { setIsFavoritesView(v => !v); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isFavoritesView ? 'Exit favorites' : 'Favorites'}</button>
-                    <button onClick={() => { setIsListView(v => !v); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isListView ? 'Grid view' : 'List view'}</button>
+                    <button onClick={() => { openPlaylists(); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Playlists</button>
+                    <button onClick={() => { setIsFavoritesView(!isFavoritesView); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isFavoritesView ? 'Exit favorites' : 'Favorites'}</button>
+                    <button onClick={() => { setIsListView(!isListView); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isListView ? 'Grid view' : 'List view'}</button>
                     <button onClick={() => { setIsSettingsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Settings</button>
                     <button onClick={() => { setIsFriendsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Friends</button>
                   </div>
@@ -720,7 +773,7 @@ export default function App() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button
-              onClick={() => { setIsBrowsePage(true); browseTopGames(); }}
+              onClick={() => navigate('/browse')}
               className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
               aria-label="Browse games"
             >
@@ -760,7 +813,7 @@ export default function App() {
             <span className="sr-only">Gengemz</span>
             {!isDataLoading && (
               <button
-                onClick={() => { setIsBrowsePage(true); browseTopGames(); }}
+                onClick={() => navigate('/browse')}
                 className="px-3 py-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] font-semibold text-sm"
               >
                 Browse Games
@@ -777,7 +830,7 @@ export default function App() {
                  {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
                </button>
              )}
-             {!showLanding && !isDataLoading && <button onClick={() => { setZoomedColumnId(null); setIsFavoritesView(!isFavoritesView); }} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
+             {!showLanding && !isDataLoading && <button onClick={() => setIsFavoritesView(!isFavoritesView)} className={`p-2 rounded-full transition-colors ${isFavoritesView ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-red-400 hover:bg-slate-800'}`} title="Favorites"><Heart size={20} className={isFavoritesView ? 'fill-red-400' : ''} /></button>}
             {!showLanding && !isDataLoading && !isFavoritesView && (
               <button
                 onClick={() => setIsListView(!isListView)}
@@ -789,7 +842,7 @@ export default function App() {
              )}
             {!showLanding && !isDataLoading && !isFavoritesView && (
               <button
-                onClick={() => { setIsPlaylistsModalOpen(true); setIsPlaylistDetailOpen(false); }}
+                onClick={openPlaylists}
                 className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 title="Playlists"
               >
@@ -832,7 +885,7 @@ export default function App() {
                 />
               </div>
             )}
-            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
+            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} onOpenMyProfile={() => navigate('/u/me')} onCopyProfileLink={copyOwnProfileLink} />}
             {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
          </div>
         </div>
@@ -929,57 +982,45 @@ export default function App() {
       </Modal>
 
 <main className={`pb-10 px-4 md:px-8 min-h-screen overflow-x-hidden ${showLanding ? 'pt-24' : isBrowsePage ? 'pt-28' : 'pt-32'}`}>
-        {isDataLoading ? (
-          <div className="h-full flex items-center justify-center animate-in fade-in">
-            <Loader2 size={40} className="animate-spin text-purple-600" />
-          </div>
-        ) : isBrowsePage ? (
-          <BrowsePage
-            filters={browseFilters}
-            setFilters={setBrowseFilters}
-            search={browseSearch}
-            setSearch={setBrowseSearch}
-            isLoading={isBrowsingGames}
-            error={browseGamesError}
-            results={browseGamesResults}
-            data={data}
-            playlists={myPlaylists}
-            onBrowse={browseTopGames}
-            onAddToList={handleBrowseListAction}
-            onBack={() => setIsBrowsePage(false)}
+        <Routes>
+          <Route
+            path="/browse"
+            element={
+              <BrowsePage
+                filters={browseFilters}
+                setFilters={setBrowseFilters}
+                search={browseSearch}
+                setSearch={setBrowseSearch}
+                isLoading={isBrowsingGames}
+                error={browseGamesError}
+                results={browseGamesResults}
+                data={data}
+                playlists={myPlaylists}
+                onBrowse={browseTopGames}
+                onAddToList={handleBrowseListAction}
+                onBack={goToBoard}
+              />
+            }
           />
-        ) : showLanding ? (
-          <LandingPage
-            theme={theme}
-            onStart={() => setIsAddModalOpen(true)}
-            onLogin={handleLogin}
+          <Route
+            path="/u/:uid"
+            element={
+              <ProfilePage
+                user={user}
+                relationships={relationships}
+                getPublicProfile={getPublicProfile}
+                loadProfileBoard={loadProfileBoard}
+                onFollowAction={handleFollowAction}
+                onBlockAction={handleBlockAction}
+                onUnblock={unblock}
+              />
+            }
           />
-        ) : (
-          <BoardPage
-            data={data}
-            favoriteGames={favoriteGames}
-            platforms={platforms}
-            hiddenGamesCount={hiddenGamesCount}
-            viewMode={{ isListView, isFavoritesView, zoomedColumnId }}
-            setViewMode={{ setIsListView, setIsFavoritesView, setZoomedColumnId }}
-            filters={{ activePlatformFilter, setActivePlatformFilter }}
-            actions={{
-              handleManualMove,
-              handleDeleteGame,
-              openGameCard,
-              toggleFavorite,
-              onDragOver,
-              onDrop,
-              onDragStart,
-              activeDropZone,
-              openAddColumnModal,
-              openEditColumnModal,
-            }}
-            playlists={myPlaylists}
-            onAddToPlaylist={addGameToPlaylist}
-            onCreatePlaylistAndAdd={createPlaceholderPlaylist}
-          />
-        )}
+          {['/', '/board/:columnId', '/favorites', '/playlists', '/playlists/:id'].map(path => (
+            <Route key={path} path={path} element={boardElement} />
+          ))}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
 
       <Modal isOpen={isGameCardOpen} onClose={() => setIsGameCardOpen(false)} title="Game Card">
@@ -1250,57 +1291,6 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* Profile View Modal */}
-      <Modal isOpen={isProfileViewOpen} onClose={() => setIsProfileViewOpen(false)} title={selectedProfile ? selectedProfile.displayName : 'Profile'}>
-        {selectedProfile ? (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-[var(--panel-muted)] text-[var(--text)] flex items-center justify-center uppercase font-bold border border-[var(--border)]">
-                {selectedProfile.displayName?.[0] || 'P'}
-              </div>
-              <div className="flex-1">
-                <div className="text-lg font-semibold text-[var(--text)]">{selectedProfile.displayName}</div>
-                <div className="text-xs text-[var(--text-muted)]">{selectedProfile.privacy === 'invite_only' ? 'Invite only' : 'Public profile'}</div>
-              </div>
-              {user && selectedProfile.uid !== user.uid && (
-                <div className="flex gap-2">
-                  <button onClick={() => handleFollowAction(selectedProfile)} className="px-3 py-1.5 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold">
-                    {relationships.following[selectedProfile.uid] ? 'Unfollow' : (selectedProfile.privacy === 'invite_only' ? 'Request' : 'Follow')}
-                  </button>
-                  <button onClick={() => handleBlockAction(selectedProfile)} className="px-3 py-1.5 rounded bg-red-100 text-red-700 text-sm border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
-                </div>
-              )}
-            </div>
-            <div className="text-sm text-[var(--text)]">{selectedProfile.bio || 'No bio provided.'}</div>
-            <div>
-              <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Board Preview</div>
-              {selectedProfileBoard ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {selectedProfileBoard.columnOrder.map(colId => (
-                    <div key={colId} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg p-3 shadow-sm">
-                      <div className="text-sm font-semibold text-[var(--text)] mb-2">{selectedProfileBoard.columns[colId].title}</div>
-                      <div className="flex flex-col gap-2 max-h-48 overflow-y-auto custom-scrollbar">
-                        {selectedProfileBoard.columns[colId].itemIds.slice(0,5).map(id => (
-                          <div key={id} className="text-xs text-[var(--text)] truncate">{selectedProfileBoard.games[id]?.title || 'Untitled'}</div>
-                        ))}
-                        {selectedProfileBoard.columns[colId].itemIds.length === 0 && <div className="text-xs text-[var(--text-muted)]">Empty</div>}
-                        {selectedProfileBoard.columns[colId].itemIds.length > 5 && <div className="text-[11px] text-[var(--text-muted)]">+{selectedProfileBoard.columns[colId].itemIds.length - 5} more</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : selectedProfileBoardError ? (
-                <div className="text-sm text-[var(--text-muted)]">{selectedProfileBoardError}</div>
-              ) : (
-                <div className="text-sm text-[var(--text-muted)]">Loading board...</div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-[var(--text-muted)]">Select a profile to view.</div>
-        )}
-      </Modal>
-
       {/* Friends / Connections Modal */}
       <Modal isOpen={isFriendsModalOpen} onClose={() => setIsFriendsModalOpen(false)} title="Connections">
         <div className="space-y-4">
@@ -1381,7 +1371,7 @@ export default function App() {
       {/* Playlists Modal - Redesigned */}
       <Modal
         isOpen={isPlaylistsModalOpen}
-        onClose={() => setIsPlaylistsModalOpen(false)}
+        onClose={closePlaylists}
         title=""
         contentClassName="max-w-6xl w-full h-[80vh] max-h-[90vh]"
       >
@@ -1404,7 +1394,7 @@ export default function App() {
               {myPlaylists.map(pl => (
                 <div key={pl.id} className="relative">
                   <button
-                    onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setOpenPlaylistMenuId(null); }}
+                    onClick={() => { openPlaylist(pl.id); setOpenPlaylistMenuId(null); }}
                     className={`w-full text-left px-3 py-2 rounded-lg border pr-10 ${selectedPlaylist?.id === pl.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel-strong)]' } transition-colors`}
                   >
                     <div className="text-sm font-semibold truncate">{pl.title}</div>
@@ -1431,7 +1421,7 @@ export default function App() {
               ))}
             </div>
             <button
-              onClick={createPlaceholderPlaylist}
+              onClick={() => createPlaceholderPlaylist()}
               disabled={isSavingPlaylist}
               className="w-full px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold disabled:opacity-60"
             >
@@ -1640,7 +1630,7 @@ export default function App() {
           {publicBrowsePlaylists.map(pl => (
             <button
               key={pl.id}
-              onClick={() => { setSelectedPlaylist(pl); setIsPlaylistDetailOpen(true); setIsBrowsePlaylistsModalOpen(false); setIsPlaylistsModalOpen(true); }}
+              onClick={() => { setIsBrowsePlaylistsModalOpen(false); openPlaylist(pl.id); }}
               className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] transition-colors text-left overflow-hidden"
             >
               <div className="aspect-[3/4] bg-gradient-to-br from-[var(--accent)]/40 to-blue-500/40 flex items-center justify-center text-[var(--text)] text-xs font-semibold">
