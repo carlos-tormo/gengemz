@@ -19,7 +19,11 @@ const useDebouncedSave = (user) => {
     timeoutRef.current = setTimeout(async () => {
       try {
         const userDocRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'data', 'board');
-        await setDoc(userDocRef, newData, { merge: true });
+        // Full overwrite on purpose: the board is owned by this one client and
+        // `newData` is the whole document. With { merge: true } Firestore deep-merges
+        // the `games`/`columns` maps, so keys deleted on the client would never be
+        // deleted on the server and would come straight back via the listener.
+        await setDoc(userDocRef, newData);
         setStatus('saved');
         setTimeout(() => setStatus('idle'), 2000);
       } catch (error) {

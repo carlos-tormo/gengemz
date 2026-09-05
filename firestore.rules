@@ -18,6 +18,34 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/artifacts/$(appId)/public_profiles/$(uid)).data.privacy;
     }
 
+    // Owner-controlled facts about the caller, used to gate reads and follows.
+    function isBlockedBy(appId, ownerUid) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/relationships/$(ownerUid)/blocked/$(request.auth.uid));
+    }
+
+    function isAcceptedFollowerOf(appId, ownerUid) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/relationships/$(ownerUid)/followers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/artifacts/$(appId)/relationships/$(ownerUid)/followers/$(request.auth.uid)).data.status == "following";
+    }
+
+    function hasPendingRequestFrom(appId, ownerUid, requesterUid) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/relationships/$(ownerUid)/requests/$(requesterUid));
+    }
+
+    // Who may read someone else's board:
+    //  - public boards: any signed-in user the owner hasn't blocked
+    //  - invite_only boards: only followers the owner has accepted
+    //  - private boards: nobody but the owner
+    function canViewBoard(appId, ownerUid) {
+      return signedIn() &&
+        !isBlockedBy(appId, ownerUid) &&
+        hasVisibleProfile(appId, ownerUid) &&
+        (
+          profilePrivacy(appId, ownerUid) == "public" ||
+          (profilePrivacy(appId, ownerUid) == "invite_only" && isAcceptedFollowerOf(appId, ownerUid))
+        );
+    }
+
     function validPrivacy(value) {
       return value in ["public", "invite_only", "private"];
     }
@@ -183,27 +211,43 @@ service cloud.firestore {
     }
 
     function validFollowing(appId, userId, profileId, data) {
-      return userId == request.auth.uid &&
-        userId != profileId &&
-        hasVisibleProfile(appId, profileId) &&
+      return userId != profileId &&
         data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "updatedAt"]) &&
         validRelationshipBase(data, profileId) &&
+        data.updatedAt == request.time &&
         (
-          (data.status == "following" && profilePrivacy(appId, profileId) == "public") ||
-          (data.status == "pending" && profilePrivacy(appId, profileId) == "invite_only")
-        ) &&
-        data.updatedAt == request.time;
+          // The follower writes their own "following" entry.
+          (userId == request.auth.uid &&
+            hasVisibleProfile(appId, profileId) &&
+            !isBlockedBy(appId, profileId) &&
+            (
+              (data.status == "following" && profilePrivacy(appId, profileId) == "public") ||
+              (data.status == "pending" && profilePrivacy(appId, profileId) == "invite_only")
+            )) ||
+          // The invite-only target accepts: flips the requester's entry from pending to following.
+          (profileId == request.auth.uid &&
+            (resource == null || resource.data.status == "pending") &&
+            data.status == "following" &&
+            hasPendingRequestFrom(appId, profileId, userId))
+        );
     }
 
     function validFollowers(appId, userId, profileId, data) {
-      return profileId == request.auth.uid &&
-        userId != profileId &&
-        hasVisibleProfile(appId, userId) &&
-        profilePrivacy(appId, userId) == "public" &&
+      return userId != profileId &&
         data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "updatedAt"]) &&
         validRelationshipBase(data, profileId) &&
         data.status == "following" &&
-        data.updatedAt == request.time;
+        data.updatedAt == request.time &&
+        (
+          // A follower adds themselves to a public user's followers list.
+          (profileId == request.auth.uid &&
+            hasVisibleProfile(appId, userId) &&
+            profilePrivacy(appId, userId) == "public" &&
+            !isBlockedBy(appId, userId)) ||
+          // The list owner accepts a pending request (invite_only).
+          (userId == request.auth.uid &&
+            hasPendingRequestFrom(appId, userId, profileId))
+        );
     }
 
     function validRequests(appId, userId, profileId, data) {
@@ -211,6 +255,7 @@ service cloud.firestore {
         userId != profileId &&
         hasVisibleProfile(appId, userId) &&
         profilePrivacy(appId, userId) == "invite_only" &&
+        !isBlockedBy(appId, userId) &&
         data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "createdAt"]) &&
         validRelationshipBase(data, profileId) &&
         data.status == "pending" &&
@@ -249,7 +294,7 @@ service cloud.firestore {
 
     match /artifacts/{appId} {
       match /users/{userId}/data/{docId} {
-        allow read: if isOwner(userId) || (docId == "board" && hasVisibleProfile(appId, userId));
+        allow read: if isOwner(userId) || (docId == "board" && canViewBoard(appId, userId));
         allow create, update: if isOwner(userId) &&
           validUserDataDoc(docId, request.resource.data);
         allow delete: if isOwner(userId) && docId in ["board", "settings"];

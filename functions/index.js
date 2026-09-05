@@ -1,6 +1,27 @@
 const {onRequest} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
+const admin = require("firebase-admin");
 const fetch = require("node-fetch");
+
+if (!admin.apps.length) admin.initializeApp();
+
+// Browser origins allowed to call this function. Auth is the real gate
+// (see verifyCaller); CORS only stops other sites from calling it from a
+// user's browser. Override with ALLOWED_ORIGINS="https://a.com,https://b.com".
+const PROJECT_ID = process.env.GCLOUD_PROJECT || "";
+const DEFAULT_ORIGINS = [
+  PROJECT_ID && `https://${PROJECT_ID}.web.app`,
+  PROJECT_ID && `https://${PROJECT_ID}.firebaseapp.com`,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5002",
+  "http://127.0.0.1:5002",
+].filter(Boolean);
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+const CORS_ORIGINS = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : DEFAULT_ORIGINS;
 
 const RAWG_API_KEY = defineSecret("RAWG_API_KEY");
 
@@ -49,12 +70,20 @@ const hasOnlyAllowedQueryParams = (query) => {
   return Object.keys(query).every((key) => ALLOWED_QUERY_PARAMS.has(key));
 };
 
-const getClientKey = (req) => {
-  const forwardedFor = req.headers["x-forwarded-for"];
-  if (typeof forwardedFor === "string" && forwardedFor) {
-    return forwardedFor.split(",")[0].trim();
+// Requires a Firebase ID token (anonymous users have one too). Returns the
+// uid, or null. The rate limiter is keyed on the uid, never on a
+// client-controlled header like X-Forwarded-For.
+const verifyCaller = async (req) => {
+  const header = req.headers.authorization || "";
+  const match = /^Bearer (.+)$/i.exec(header);
+  if (!match) return null;
+  try {
+    const decoded = await admin.auth().verifyIdToken(match[1]);
+    return decoded.uid || null;
+  } catch (error) {
+    console.warn("Rejected ID token:", error.code || error.message);
+    return null;
   }
-  return req.ip || (req.socket && req.socket.remoteAddress) || "unknown";
 };
 
 const isRateLimited = (key) => {
@@ -162,7 +191,7 @@ const buildRawgParams = (req, apiKey) => {
 
 exports.searchGames = onRequest(
     {
-      cors: true,
+      cors: CORS_ORIGINS,
       secrets: [RAWG_API_KEY],
     },
     async (req, res) => {
@@ -177,7 +206,12 @@ exports.searchGames = onRequest(
         });
       }
 
-      if (isRateLimited(getClientKey(req))) {
+      const uid = await verifyCaller(req);
+      if (!uid) {
+        return res.status(401).json({error: "Unauthorized"});
+      }
+
+      if (isRateLimited(uid)) {
         return res.status(429).json({error: "Too Many Requests"});
       }
 
@@ -188,7 +222,7 @@ exports.searchGames = onRequest(
 
       const cached = getCachedResponse(params.cacheKey);
       if (cached) {
-        res.set("Cache-Control", "public, max-age=300, s-maxage=600");
+        res.set("Cache-Control", "private, max-age=300");
         res.set("X-Cache", "HIT");
         return res.json(cached);
       }
@@ -203,7 +237,7 @@ exports.searchGames = onRequest(
 
         const data = await response.json();
         setCachedResponse(params.cacheKey, data);
-        res.set("Cache-Control", "public, max-age=300, s-maxage=600");
+        res.set("Cache-Control", "private, max-age=300");
         res.set("X-Cache", "MISS");
         return res.json(data);
       } catch (error) {

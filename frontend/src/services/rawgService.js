@@ -1,4 +1,26 @@
 import { BACKEND_URL } from '../config/constants';
+import { auth } from '../config/firebase';
+
+// searchGames requires a Firebase ID token. Anonymous sessions have one, but
+// the auth listener in App.jsx may still be signing in on first load, so wait
+// briefly for a user before giving up.
+const waitForUser = () =>
+  new Promise((resolve) => {
+    if (auth.currentUser) return resolve(auth.currentUser);
+    const timer = setTimeout(() => { unsubscribe(); resolve(null); }, 5000);
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) { clearTimeout(timer); unsubscribe(); resolve(user); }
+    });
+  });
+
+const fetchBackend = async (query) => {
+  const user = await waitForUser();
+  if (!user) throw new Error('Not signed in');
+  const token = await user.getIdToken();
+  return fetch(`${BACKEND_URL}?${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+};
 
 export const normalizeQuery = (query) => query.toLowerCase().trim().replace(/\s+/g, ' ');
 
@@ -18,7 +40,7 @@ export const searchGamesWithVariants = async (rawQuery, fallbackQuery) => {
   if (variants.length === 0) return [];
 
   for (const variant of variants) {
-    const response = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(variant)}`);
+    const response = await fetchBackend(`search=${encodeURIComponent(variant)}`);
     if (!response.ok) throw new Error('Search failed');
     const data = await response.json();
     if (data.results && data.results.length > 0) {
@@ -41,7 +63,7 @@ export const browseGames = async ({ filters, search }) => {
   if (datesStr) params.append('dates', datesStr);
   if (search) params.append('search', search);
 
-  const response = await fetch(`${BACKEND_URL}?${params.toString()}`);
+  const response = await fetchBackend(params.toString());
   if (!response.ok) throw new Error('Browse failed');
   const data = await response.json();
   const now = new Date();

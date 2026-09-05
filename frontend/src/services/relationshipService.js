@@ -5,6 +5,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { APP_ID } from '../config/constants';
 import { db } from '../config/firebase';
@@ -85,12 +86,68 @@ export const unfollowProfile = async (user, targetUid) => {
   const theirRoot = relationshipRoot(targetUid);
 
   try {
-    await deleteDoc(doc(myRoot, 'following', targetUid));
-    await deleteDoc(doc(theirRoot, 'followers', user.uid));
+    await Promise.all([
+      deleteDoc(doc(myRoot, 'following', targetUid)),
+      deleteDoc(doc(theirRoot, 'followers', user.uid)),
+      // Withdraws a still-pending request to an invite-only profile.
+      deleteDoc(doc(theirRoot, 'requests', user.uid)),
+    ]);
     return { ok: true };
   } catch (error) {
     console.error('Unfollow failed', error);
     return { ok: false, error: error.message || 'Unfollow failed' };
+  }
+};
+
+// Owner of an invite-only profile accepts a pending follow request.
+// One atomic batch: the rules require the request doc to still exist while
+// the followers entry is created and the requester's entry is flipped.
+export const acceptFollowRequest = async (user, requester) => {
+  if (!user || !requester?.uid || requester.uid === user.uid) {
+    return { ok: false, error: 'invalid' };
+  }
+
+  const myRoot = relationshipRoot(user.uid);
+  const theirRoot = relationshipRoot(requester.uid);
+
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(myRoot, 'followers', requester.uid), {
+      uid: requester.uid,
+      displayName: requester.displayName || 'Player',
+      photoURL: requester.photoURL || '',
+      status: 'following',
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    batch.set(doc(theirRoot, 'following', user.uid), {
+      uid: user.uid,
+      displayName: user.displayName || 'Player',
+      photoURL: user.photoURL || '',
+      status: 'following',
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    batch.delete(doc(myRoot, 'requests', requester.uid));
+    await batch.commit();
+    return { ok: true };
+  } catch (error) {
+    console.error('Accept request failed', error);
+    return { ok: false, error: error.message || 'Accept failed' };
+  }
+};
+
+// Owner declines (or later revokes) a pending request: removes it from both sides.
+export const declineFollowRequest = async (user, requesterUid) => {
+  if (!user || !requesterUid) return { ok: false, error: 'invalid' };
+
+  try {
+    await Promise.all([
+      deleteDoc(doc(relationshipRoot(user.uid), 'requests', requesterUid)),
+      deleteDoc(doc(relationshipRoot(requesterUid), 'following', user.uid)),
+    ]);
+    return { ok: true };
+  } catch (error) {
+    console.error('Decline request failed', error);
+    return { ok: false, error: error.message || 'Decline failed' };
   }
 };
 
@@ -115,6 +172,8 @@ export const blockProfile = async (user, profile) => {
       deleteDoc(doc(myRoot, 'followers', profile.uid)),
       deleteDoc(doc(theirRoot, 'followers', user.uid)),
       deleteDoc(doc(theirRoot, 'following', user.uid)),
+      deleteDoc(doc(myRoot, 'requests', profile.uid)),
+      deleteDoc(doc(theirRoot, 'requests', user.uid)),
     ]);
 
     return { ok: true };

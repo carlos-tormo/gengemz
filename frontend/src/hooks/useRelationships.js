@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  acceptFollowRequest,
   blockProfile,
+  declineFollowRequest,
   followProfile,
   subscribeToRelationshipType,
   unblockProfile,
@@ -47,6 +49,8 @@ const useRelationships = (user) => {
     unfollow: (targetUid) => unfollowProfile(user, targetUid),
     block: (profile) => blockProfile(user, profile),
     unblock: (targetUid) => unblockProfile(user, targetUid),
+    acceptRequest: (requester) => acceptFollowRequest(user, requester),
+    declineRequest: (requesterUid) => declineFollowRequest(user, requesterUid),
   };
 };
 

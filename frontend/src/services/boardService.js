@@ -41,7 +41,48 @@ export const mergeGuestBoardIntoUserBoard = async (guestData, targetUid) => {
     };
   }
 
-  await setDoc(targetRef, finalData, { merge: true });
+  // Full overwrite (no merge) so removed games/columns don't survive server-side.
+  await setDoc(targetRef, pruneOrphanedBoardData(finalData));
+};
+
+/**
+ * Drops board entries nothing references any more:
+ *  - column ids in `columnOrder` that have no column object
+ *  - columns not listed in `columnOrder`
+ *  - itemIds that point at games which no longer exist
+ *  - games that no live column lists
+ * Returns the same object when nothing needed pruning, so callers can use
+ * identity to decide whether a re-save is needed.
+ */
+export const pruneOrphanedBoardData = (data) => {
+  if (!data) return data;
+  const games = data.games || {};
+  const columns = data.columns || {};
+  const columnOrder = Array.isArray(data.columnOrder) ? data.columnOrder : [];
+
+  const liveOrder = columnOrder.filter((id) => columns[id]);
+  const liveColumns = {};
+  const referenced = new Set();
+  let changed = liveOrder.length !== columnOrder.length
+    || Object.keys(columns).length !== liveOrder.length;
+
+  liveOrder.forEach((columnId) => {
+    const column = columns[columnId];
+    const rawIds = Array.isArray(column.itemIds) ? column.itemIds : [];
+    const itemIds = rawIds.filter((gameId) => games[gameId] && !referenced.has(gameId));
+    itemIds.forEach((gameId) => referenced.add(gameId));
+    if (itemIds.length !== rawIds.length) changed = true;
+    liveColumns[columnId] = itemIds === column.itemIds ? column : { ...column, itemIds };
+  });
+
+  const liveGames = {};
+  Object.keys(games).forEach((gameId) => {
+    if (referenced.has(gameId)) liveGames[gameId] = games[gameId];
+    else changed = true;
+  });
+
+  if (!changed) return data;
+  return { ...data, games: liveGames, columns: liveColumns, columnOrder: liveOrder };
 };
 
 export const createBoardGameFromRaw = (raw) => ({

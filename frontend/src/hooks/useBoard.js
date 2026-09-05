@@ -7,6 +7,7 @@ import {
   mergeGuestBoardIntoUserBoard,
   moveGameOnBoardData,
   patchGameOnBoardData,
+  pruneOrphanedBoardData,
   removeGameFromBoardData,
   saveColumnToBoardData,
   subscribeToBoard,
@@ -41,7 +42,12 @@ const useBoard = (user) => {
       user,
       (boardData) => {
         clearTimeout(timeout);
-        setData(boardData);
+        // One-off cleanup of "zombie" games/columns left behind by the old
+        // { merge: true } saves. If anything was pruned, write the clean
+        // document back once; the next snapshot will then match and no-op.
+        const cleaned = pruneOrphanedBoardData(boardData);
+        setData(cleaned);
+        if (cleaned !== boardData) triggerSave(cleaned);
         setLoadedUserId(user.uid);
       },
       (error) => {
@@ -55,7 +61,7 @@ const useBoard = (user) => {
       clearTimeout(timeout);
       unsubscribe();
     };
-  }, [user]);
+  }, [user, triggerSave]);
 
   const performSmartMigration = useCallback(async (guestData, targetUid) => {
     try {

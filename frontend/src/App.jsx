@@ -56,7 +56,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   
   const { data, dataRef, isDataLoading, saveStatus, performSmartMigration, boardActions } = useBoard(user);
-  const { relationships, follow, unfollow, block, unblock } = useRelationships(user);
+  const { relationships, follow, unfollow, block, unblock, acceptRequest, declineRequest } = useRelationships(user);
   const {
     userSettings,
     setUserSettings,
@@ -107,6 +107,7 @@ export default function App() {
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
+  const [selectedProfileBoardError, setSelectedProfileBoardError] = useState(null);
   const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
   const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
   const [isListView, setIsListView] = useState(false);
@@ -316,11 +317,29 @@ export default function App() {
   const openProfile = async (profile) => {
     setSelectedProfile(profile);
     setSelectedProfileBoard(null);
+    setSelectedProfileBoardError(null);
     setIsProfileViewOpen(true);
     try {
       setSelectedProfileBoard(await loadProfileBoard(profile.uid));
     } catch (err) {
-      console.error("Failed to load profile board", err);
+      if (err?.code === 'permission-denied') {
+        setSelectedProfileBoardError(
+          profile.privacy === 'invite_only'
+            ? 'This board is invite only. Send a follow request to see it once accepted.'
+            : 'You do not have access to this board.',
+        );
+      } else {
+        console.error("Failed to load profile board", err);
+        setSelectedProfileBoardError('Could not load this board.');
+      }
+    }
+  };
+
+  const handleRequestAction = async (requester, accept) => {
+    if (!user) return;
+    const res = accept ? await acceptRequest(requester) : await declineRequest(requester.uid);
+    if (!res?.ok && res?.error) {
+      alert(res.error);
     }
   };
 
@@ -1270,6 +1289,8 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+              ) : selectedProfileBoardError ? (
+                <div className="text-sm text-[var(--text-muted)]">{selectedProfileBoardError}</div>
               ) : (
                 <div className="text-sm text-[var(--text-muted)]">Loading board...</div>
               )}
@@ -1300,6 +1321,25 @@ export default function App() {
               {Object.keys(relationships.following || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">Not following anyone yet.</div>}
             </div>
           </section>
+
+          {Object.keys(relationships.requests || {}).length > 0 && (
+            <section>
+              <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Follow Requests</div>
+              <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                {Object.values(relationships.requests || {}).map(p => (
+                  <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
+                    <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-[var(--text)] truncate">{p.displayName || 'Player'}</div>
+                      <div className="text-[11px] text-[var(--text-muted)] truncate">Wants to follow you</div>
+                    </div>
+                    <button onClick={() => handleRequestAction(p, true)} className="text-xs px-2 py-1 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-semibold">Accept</button>
+                    <button onClick={() => handleRequestAction(p, false)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">Decline</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section>
             <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Followers</div>
