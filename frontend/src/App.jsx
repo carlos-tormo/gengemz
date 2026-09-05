@@ -1,63 +1,72 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Plus, MoreVertical, Gamepad2, X, GripVertical, Trash2,
+  Plus, MoreVertical, Gamepad2, X, Trash2,
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
-  ArrowRight, Save, WifiOff, Filter, EyeOff, ArrowLeft, LayoutGrid, List,
+  ArrowRight, Save, WifiOff, LayoutGrid, List,
   Pencil, Lock, Unlock, Calendar, Heart, Star,
   Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun, Menu
 } from 'lucide-react';
 // Firebase imports
-import { auth, db } from './config/firebase';
+import { auth } from './config/firebase';
 import { 
   signOut, onAuthStateChanged, signInAnonymously, 
   updateProfile, signInWithPopup, GoogleAuthProvider,
   setPersistence, browserLocalPersistence
 } from "firebase/auth";
-import { 
-  doc, onSnapshot, setDoc, addDoc, getDoc, deleteDoc, collection, query, where, getDocs, updateDoc, serverTimestamp
-} from "firebase/firestore";
 
 // Constants and config
 import { 
-  APP_ID, BACKEND_URL, PLACEHOLDER_COVERS, INITIAL_DATA, COLUMN_ICONS
+  PLACEHOLDER_COVERS, COLUMN_ICONS
 } from './config/constants';
 
 // Components
 import Modal from './components/Modal';
 import IconRenderer from './components/IconRenderer';
 import GameCard from './components/GameCard';
-import GridGameCard from './components/GridGameCard';
-import Column from './components/Column';
 import UserMenu from './components/UserMenu';
 import LandingPage from './components/LandingPage';
+import BrowsePage from './components/BrowsePage';
+import SearchDropdown from './components/SearchDropdown';
+import BoardPage from './components/BoardPage';
 import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
 import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
-import logoIconLight from './assets/logo-icon-light-2026.svg';
-import logoIconDark from './assets/logo-icon-dark-2026.svg';
 
 // Hooks
 import useClickOutside from './hooks/useClickOutside';
-import useDebouncedSave from './hooks/useDebouncedSave';
 import useRelationships from './hooks/useRelationships';
+import useTheme from './hooks/useTheme';
+import usePlaylists from './hooks/usePlaylists';
+import useUserProfile from './hooks/useUserProfile';
+import useBoard from './hooks/useBoard';
+import useGameSearch from './hooks/useGameSearch';
+import { browseGames } from './services/rawgService';
+import { findPlaylistForGame as findPlaylistForGameInList } from './services/playlistService';
+import { createBoardGameFromRaw } from './services/boardService';
 
 // Utilities
 import { 
   getUniquePlatforms, getHiddenGamesCount, getFavoriteGames, 
-  findExistingGameIdByTitle, getGameColumnId, isGameOnBoard 
+  createClientId, findExistingGameId, getGameColumnId, isGameOnBoard, sameGameIdentity
 } from './utils/gameUtils';
-import { saveData } from './utils/dataManagement';
 
 // --- Main App Component ---
 
 export default function App() {
-  const [data, setData] = useState(INITIAL_DATA);
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isDataLoading, setIsDataLoading] = useState(true); 
   
-  // Optimized Save Hook
-  const { status: saveStatus, save: triggerSave } = useDebouncedSave(user);
+  const { data, dataRef, isDataLoading, saveStatus, performSmartMigration, boardActions } = useBoard(user);
   const { relationships, follow, unfollow, block, unblock } = useRelationships(user);
+  const {
+    userSettings,
+    setUserSettings,
+    isOnboardingModalOpen,
+    setIsOnboardingModalOpen,
+    saveUserSettings,
+    createDebugProfiles: seedDebugProfiles,
+    searchPublicProfiles,
+    loadProfileBoard,
+  } = useUserProfile(user);
   
   // View State
   const [activePlatformFilter, setActivePlatformFilter] = useState('All');
@@ -74,25 +83,20 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
   
   // Game Card Modal State
   const [isGameCardOpen, setIsGameCardOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
-  const [isGameCardEditing, setIsGameCardEditing] = useState(false);
-  const [selectedGameDetail, setSelectedGameDetail] = useState(null);
-  const [isLoadingGameDetail, setIsLoadingGameDetail] = useState(false);
-  const [gameDetailError, setGameDetailError] = useState(null);
   const [ratingHover, setRatingHover] = useState(null);
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false);
   const [isPlaylistMenuOpen, setIsPlaylistMenuOpen] = useState(false);
   const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
-  const normalizeTitle = (t) => (t || '').trim().toLowerCase();
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState(null);
+  const addGameSearch = useGameSearch();
+  const navGameSearch = useGameSearch();
+  const playlistGameSearch = useGameSearch();
+  const gameDetailSearch = useGameSearch();
+  const selectedGameDetail = gameDetailSearch.results?.[0] || null;
 
   // User Search / Social
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -100,74 +104,78 @@ export default function App() {
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [userSearchError, setUserSearchError] = useState(null);
   const [navSearchMode, setNavSearchMode] = useState('games'); // 'players' | 'games'
-  const [navGameResults, setNavGameResults] = useState([]);
-  const [navGameError, setNavGameError] = useState(null);
-  const [isSearchingNavGames, setIsSearchingNavGames] = useState(false);
-  const [navGameHasSearched, setNavGameHasSearched] = useState(false);
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [selectedProfileBoard, setSelectedProfileBoard] = useState(null);
   const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
   const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
   const [isListView, setIsListView] = useState(false);
-  const [playlists, setPlaylists] = useState([]);
   const [isPlaylistsModalOpen, setIsPlaylistsModalOpen] = useState(false);
   const [isPlaylistDetailOpen, setIsPlaylistDetailOpen] = useState(false);
   const [isBrowsePlaylistsModalOpen, setIsBrowsePlaylistsModalOpen] = useState(false);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
-  const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
-  const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
-  const [playlistSearchResults, setPlaylistSearchResults] = useState([]);
-  const [isSearchingPlaylistGames, setIsSearchingPlaylistGames] = useState(false);
-  const [playlistSearchError, setPlaylistSearchError] = useState(null);
   const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
   const [duplicateTarget, setDuplicateTarget] = useState('');
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
-  const [theme, setTheme] = useState('dark');
-  const myPlaylists = playlists.filter(pl => pl.ownerUid === user?.uid);
-  const publicBrowsePlaylists = playlists.filter(pl => pl.ownerUid && pl.ownerUid !== user?.uid && pl.privacy !== 'private');
-  const [isBrowseGamesModalOpen, setIsBrowseGamesModalOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+  const { myPlaylists, publicBrowsePlaylists, isSavingPlaylist, playlistActions } = usePlaylists(user);
   const [browseGamesResults, setBrowseGamesResults] = useState([]);
   const [browseFilters, setBrowseFilters] = useState({ ordering: '-metacritic', page_size: 50, platformId: '', startDate: '', endDate: '', genreId: '', minRating: 0, year: '' });
   const [isBrowsingGames, setIsBrowsingGames] = useState(false);
   const [browseGamesError, setBrowseGamesError] = useState(null);
-  const [browseMenuGameId, setBrowseMenuGameId] = useState(null);
-  const [browseMenuPos, setBrowseMenuPos] = useState(null);
-  const [browseMenuGame, setBrowseMenuGame] = useState(null);
   const [browseSearch, setBrowseSearch] = useState('');
   const [isBrowsePage, setIsBrowsePage] = useState(false);
   const [isPlaylistAddOpen, setIsPlaylistAddOpen] = useState(false);
   const [hoveredPlaylistItemIdx, setHoveredPlaylistItemIdx] = useState(null);
   const [selectedPlaylistItemIdx, setSelectedPlaylistItemIdx] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const {
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    results: searchResults,
+    isSearching,
+    error: searchError,
+    hasSearched: searchHasSearched,
+    search: runAddGameSearch,
+    reset: resetAddGameSearch,
+  } = addGameSearch;
+  const {
+    results: navGameResults,
+    setResults: setNavGameResults,
+    isSearching: isSearchingNavGames,
+    error: navGameError,
+    setError: setNavGameError,
+    hasSearched: navGameHasSearched,
+    setHasSearched: setNavGameHasSearched,
+    search: runNavGameSearch,
+  } = navGameSearch;
+  const {
+    query: playlistSearchQuery,
+    setQuery: setPlaylistSearchQuery,
+    results: playlistSearchResults,
+    setResults: setPlaylistSearchResults,
+    isSearching: isSearchingPlaylistGames,
+    error: playlistSearchError,
+    hasSearched: playlistSearchHasSearched,
+    search: runPlaylistGameSearch,
+    reset: resetPlaylistGameSearch,
+  } = playlistGameSearch;
+  const {
+    isSearching: isLoadingGameDetail,
+    error: gameDetailError,
+    search: runGameDetailSearch,
+    reset: resetGameDetailSearch,
+  } = gameDetailSearch;
 
-  // New User Settings State
-  const [userSettings, setUserSettings] = useState({
-    privacy: '', 
-    bio: '',
-    displayName: '' // Consolidated Single Source of Truth
-  });
-
-  const dataRef = useRef(INITIAL_DATA);
   const userRef = useRef(null);
-  const userSearchRef = useRef(null);
+  // const userSearchRef = useRef(null);
   const moveMenuRef = useRef(null);
   const playlistMenuRef = useRef(null);
   const desktopSearchRef = useRef(null);
   const mobileMenuRef = useRef(null);
 
-  useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { userRef.current = user; }, [user]);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('ggz-theme');
-      if (stored === 'light' || stored === 'dark') setTheme(stored);
-    } catch (err) {
-      console.error('Theme load failed', err);
-    }
-  }, []);
 
   useEffect(() => {
     if (selectedPlaylist && selectedPlaylist.ownerUid !== user?.uid && selectedPlaylist.privacy === 'private') {
@@ -176,41 +184,11 @@ export default function App() {
     }
   }, [selectedPlaylist, user]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('ggz-theme', theme);
-    } catch (err) {
-      console.error('Theme save failed', err);
-    }
-    const root = document.documentElement;
-    root.classList.remove('theme-dark', 'theme-light');
-    root.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark');
-  }, [theme]);
-
-  useClickOutside(userSearchRef, () => {
-    setUserSearchResults([]);
-    setUserSearchError(null);
-    setNavGameResults([]);
-    setNavGameError(null);
-    setNavGameHasSearched(false);
-  });
+  // Legacy search click outside (desktop search now handled via desktopSearchRef)
   useClickOutside(moveMenuRef, () => setIsMoveMenuOpen(false));
   useClickOutside(playlistMenuRef, () => { setIsPlaylistMenuOpen(false); setIsPlaylistSelectorOpen(false); });
   useClickOutside(desktopSearchRef, () => setIsSearchBarOpen(false));
   useClickOutside(mobileMenuRef, () => setIsMobileMenuOpen(false));
-
-  // Load playlists (public)
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'artifacts', APP_ID, 'playlists'), (snap) => {
-      const list = [];
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-        list.push({ id: docSnap.id, ...data, ownerUid: data.ownerUid || 'unknown' });
-      });
-    setPlaylists(list);
-  }, (err) => console.error("Playlists load failed", err));
-    return () => unsub();
-  }, []);
 
   useEffect(() => {
     if (isPlaylistsModalOpen && myPlaylists.length > 0 && !selectedPlaylist) {
@@ -222,22 +200,16 @@ export default function App() {
   useEffect(() => {
     if (!isPlaylistsModalOpen) {
       setIsPlaylistAddOpen(false);
-      setPlaylistSearchQuery('');
-      setPlaylistSearchResults([]);
-      setPlaylistSearchError(null);
-      setIsSearchingPlaylistGames(false);
+      resetPlaylistGameSearch();
     }
-  }, [isPlaylistsModalOpen]);
+  }, [isPlaylistsModalOpen, resetPlaylistGameSearch]);
 
   useEffect(() => {
     setIsPlaylistAddOpen(false);
-    setPlaylistSearchQuery('');
-    setPlaylistSearchResults([]);
-    setPlaylistSearchError(null);
-    setIsSearchingPlaylistGames(false);
+    resetPlaylistGameSearch();
     setHoveredPlaylistItemIdx(null);
     setSelectedPlaylistItemIdx(null);
-  }, [selectedPlaylist?.id]);
+  }, [selectedPlaylist?.id, resetPlaylistGameSearch]);
 
   // Default delete options when opening the column modal
   useEffect(() => {
@@ -252,15 +224,12 @@ export default function App() {
     }
   }, [isColumnModalOpen, isEditingColumn, data.columnOrder, columnForm.id]);
 
-  const [isDragging, setIsDragging] = useState(false);
+  const [, setIsDragging] = useState(false);
   const [draggedItem, setDraggedItem] = useState(null);
   const [activeDropZone, setActiveDropZone] = useState(null);
 
   const hiddenGamesCount = getHiddenGamesCount(data, activePlatformFilter);
   const favoriteGames = getFavoriteGames(data);
-
-  // --- REFACTORED SAVEDATA (Functional Updates) ---
-  const save = saveData(setData, triggerSave);
 
   useEffect(() => {
     setPersistence(auth, browserLocalPersistence).then(() => {
@@ -271,100 +240,21 @@ export default function App() {
         setUser(u);
         setIsAuthLoading(false);
         if (u) {
-          loadUserSettings(u.uid);
-          // Sync Display Name from Auth if not locally set yet
-          setUserSettings(prev => ({ ...prev, displayName: u.displayName || prev.displayName }));
           if (guestData) await performSmartMigration(guestData, u.uid);
         } else {
           signInAnonymously(auth);
         }
       });
     });
-  }, []);
-
-  const loadUserSettings = (uid) => {
-    onSnapshot(doc(db, 'artifacts', APP_ID, 'users', uid, 'data', 'settings'), (snap) => {
-      if (snap.exists()) {
-        const settings = snap.data();
-        setUserSettings(prev => ({ ...prev, ...settings }));
-        if (!settings.privacy && !auth.currentUser?.isAnonymous) {
-          setIsOnboardingModalOpen(true);
-        }
-      } else if (!auth.currentUser?.isAnonymous) {
-        setIsOnboardingModalOpen(true);
-      }
-    });
-  };
-
-  const saveUserSettings = (newSettings) => {
-    setUserSettings(newSettings);
-    if (!user) return;
-    setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'data', 'settings'), newSettings, { merge: true });
-    
-    const publicProfileRef = doc(db, 'artifacts', APP_ID, 'public_profiles', user.uid);
-    if (newSettings.privacy !== 'private') {
-      setDoc(publicProfileRef, {
-        uid: user.uid,
-        displayName: newSettings.displayName || user.displayName,
-        photoURL: user.photoURL,
-        privacy: newSettings.privacy,
-        bio: newSettings.bio
-      }, { merge: true });
-    } else {
-      setDoc(publicProfileRef, { privacy: 'private' }, { merge: true });
-    }
-  };
+  }, [dataRef, performSmartMigration]);
 
   // --- DEBUG: Force Create Profiles ---
   const createDebugProfiles = async () => {
-    if (!user) return;
     try {
-      const debugUsers = [
-        { uid: 'debug_user_1', displayName: 'PixelWarrior', privacy: 'public', bio: 'I love RPGs' },
-        { uid: 'debug_user_2', displayName: 'RetroGamer99', privacy: 'public', bio: 'NES era best era' },
-        { uid: 'debug_user_3', displayName: 'SpeedRun_X', privacy: 'public', bio: 'Gotta go fast' }
-      ];
-      for (const u of debugUsers) await setDoc(doc(db, 'artifacts', APP_ID, 'public_profiles', u.uid), u);
-      await setDoc(doc(db, 'artifacts', APP_ID, 'public_profiles', user.uid), { uid: user.uid, displayName: user.displayName || 'Me', privacy: 'public', bio: 'My profile' }, { merge: true });
+      await seedDebugProfiles();
       alert("Debug profiles created!");
     } catch (e) { alert("Error: " + e.message); }
   };
-
-  const performSmartMigration = async (guestData, targetUid) => {
-    if (!guestData?.games) return;
-    try {
-      // Migration doesn't use saveStatus to avoid conflict
-      const targetRef = doc(db, 'artifacts', APP_ID, 'users', targetUid, 'data', 'board');
-      const snap = await getDoc(targetRef);
-      let finalData = guestData;
-      if (snap.exists()) {
-        const target = snap.data();
-        const mergedGames = { ...target.games, ...guestData.games };
-        const mergedCols = { ...target.columns };
-        Object.keys(guestData.columns).forEach(cid => {
-          if (mergedCols[cid]) {
-            const newIds = guestData.columns[cid].itemIds.filter(id => !mergedCols[cid].itemIds.includes(id));
-            mergedCols[cid].itemIds = [...mergedCols[cid].itemIds, ...newIds];
-          }
-        });
-        finalData = { games: mergedGames, columns: mergedCols, columnOrder: target.columnOrder || INITIAL_DATA.columnOrder };
-      }
-      await setDoc(targetRef, finalData, { merge: true });
-    } catch (e) { console.error(e); }
-  };
-
-  useEffect(() => {
-    if (!user) { setIsDataLoading(false); return; }
-    setIsDataLoading(true);
-    const timeout = setTimeout(() => setIsDataLoading(false), 3000);
-    const unsub = onSnapshot(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'data', 'board'), (snap) => {
-      clearTimeout(timeout);
-      setData(snap.exists() ? snap.data() : INITIAL_DATA);
-      setIsDataLoading(false);
-    });
-    return () => { clearTimeout(timeout); unsub(); };
-  }, [user]);
-
 
   const handleLogin = async () => { try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (e) { alert(e.message); } };
   const handleLogout = () => signOut(auth);
@@ -399,16 +289,7 @@ export default function App() {
       setIsSearchingUsers(true);
       setUserSearchError(null);
       try {
-        const q = query(collection(db, 'artifacts', APP_ID, 'public_profiles'), where("privacy", "in", ["public", "invite_only"]));
-        const querySnapshot = await getDocs(q);
-        const results = [];
-        querySnapshot.forEach((doc) => {
-          const p = doc.data();
-          if (p.displayName && p.displayName.toLowerCase().includes(userSearchQuery.toLowerCase())) {
-            results.push(p);
-          }
-        });
-        setUserSearchResults(results);
+        setUserSearchResults(await searchPublicProfiles(userSearchQuery));
       } catch (e) {
         console.error("Search failed", e);
         setUserSearchError("Search failed. Try again.");
@@ -422,19 +303,12 @@ export default function App() {
         return;
       }
       setNavGameHasSearched(true);
-      setIsSearchingNavGames(true);
       setNavGameError(null);
       try {
-        await fetchGamesWithVariants(userSearchQuery, {
-          onResults: setNavGameResults,
-          onError: setNavGameError,
-          setLoading: setIsSearchingNavGames,
-        });
+        await runNavGameSearch(userSearchQuery);
       } catch (e) {
         console.error("Game search failed", e);
         setNavGameError("Search failed. Try again.");
-      } finally {
-        setIsSearchingNavGames(false);
       }
     }
   };
@@ -444,8 +318,7 @@ export default function App() {
     setSelectedProfileBoard(null);
     setIsProfileViewOpen(true);
     try {
-      const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'users', profile.uid, 'data', 'board'));
-      if (snap.exists()) setSelectedProfileBoard(snap.data());
+      setSelectedProfileBoard(await loadProfileBoard(profile.uid));
     } catch (err) {
       console.error("Failed to load profile board", err);
     }
@@ -468,56 +341,18 @@ export default function App() {
     }
   };
 
-  const normalizeQuery = (q) => q.toLowerCase().trim().replace(/\s+/g, ' ');
-  const generateQueryVariants = (q) => {
-    const base = normalizeQuery(q);
-    const variants = [base];
-    const spaced = base.replace(/([a-zA-Z])([0-9])/g, '$1 $2').replace(/([0-9])([a-zA-Z])/g, '$1 $2');
-    if (spaced !== base) variants.push(spaced);
-    return [...new Set(variants.filter(Boolean))];
-  };
-
-  const fetchGamesWithVariants = async (rawQuery, { onResults, onError, setLoading, fallbackQuery }) => {
-    const variants = rawQuery.trim() ? generateQueryVariants(rawQuery) : [];
-    if (fallbackQuery) variants.push(fallbackQuery);
-    if (variants.length === 0) return;
-    setLoading(true);
-    if (onError) onError(null);
-    try {
-      for (const v of variants) {
-        const res = await fetch(`${BACKEND_URL}?search=${encodeURIComponent(v)}`);
-        if (!res.ok) throw new Error("Search failed");
-        const d = await res.json();
-        if (d.results && d.results.length > 0) {
-          onResults(d.results);
-          return;
-        }
-      }
-      onResults([]);
-    } catch (err) {
-      console.error("Game search failed", err);
-      if (onError) onError("Search failed. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handlePlaylistSearch = async (e) => {
     if (e?.preventDefault) e.preventDefault();
     if (!playlistSearchQuery.trim()) {
       setPlaylistSearchResults([]);
       return;
     }
-    fetchGamesWithVariants(playlistSearchQuery, {
-      onResults: setPlaylistSearchResults,
-      onError: setPlaylistSearchError,
-      setLoading: setIsSearchingPlaylistGames,
-    });
+    await runPlaylistGameSearch(playlistSearchQuery);
   };
 
   const updatePlaylistFields = async (playlistId, fields) => {
     try {
-      await updateDoc(doc(db, 'artifacts', APP_ID, 'playlists', playlistId), { ...fields, updatedAt: serverTimestamp() });
+      await playlistActions.updateFields(playlistId, fields);
       if (selectedPlaylist?.id === playlistId) {
         setSelectedPlaylist(prev => prev ? { ...prev, ...fields } : prev);
       }
@@ -546,11 +381,9 @@ export default function App() {
     if (!target) return;
     const confirmed = confirm(`Remove "${target.title}" from ${pl.title}?`);
     if (!confirmed) return;
-    const updated = items.filter((_, i) => i !== idx);
     try {
-      await updateDoc(doc(db, 'artifacts', APP_ID, 'playlists', pl.id), { items: updated, updatedAt: serverTimestamp() });
+      const updated = await playlistActions.removeItemAtIndex(pl, idx);
       setSelectedPlaylist(prev => prev?.id === pl.id ? { ...prev, items: updated } : prev);
-      setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
     } catch (err) {
       alert(err.message || "Failed to remove game");
     }
@@ -560,7 +393,7 @@ export default function App() {
     const confirmDelete = confirm(`Delete playlist "${pl.title}"?`);
     if (!confirmDelete) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', APP_ID, 'playlists', pl.id));
+      await playlistActions.removePlaylist(pl.id);
       if (selectedPlaylist?.id === pl.id) {
         setSelectedPlaylist(null);
         setIsPlaylistDetailOpen(false);
@@ -573,154 +406,60 @@ export default function App() {
   };
 
   // --- Playlists ---
+  const promptDuplicateMove = (gameId) => {
+    const currentCol = getGameColumnId(data, gameId);
+    setDuplicateInfo({ gameId, currentCol });
+    setDuplicateTarget(currentCol || data.columnOrder[0]);
+    setIsDuplicateModalOpen(true);
+  };
+
   const addPlaylistItemToList = (item, colId) => {
-    const existingId = findExistingGameIdByTitle(data, item.title);
+    const existingId = findExistingGameId(data, item);
     if (existingId) {
       promptDuplicateMove(existingId);
       return;
     }
-    const newId = `g${Date.now()}`;
     const target = colId && data.columns[colId] ? colId : data.columnOrder[0];
-    save(prev => ({
-      ...prev,
-      games: { 
-        ...prev.games, 
-        [newId]: { 
-          id: newId,
-          title: item.title,
-          platform: item.platform,
-          genre: item.genre,
-          year: item.year,
-          cover: item.cover,
-          coverIndex: item.coverIndex || 0,
-          rating: item.rating || 0,
-          isFavorite: item.isFavorite || false
-        } 
-      },
-      columns: {
-        ...prev.columns,
-        [target]: {
-          ...prev.columns[target],
-          itemIds: [newId, ...prev.columns[target].itemIds]
-        }
-      }
-    }));
-    cleanGameDuplicates(newId, item.title, target);
+    boardActions.addGameToBoard({
+      title: item.title,
+      platform: item.platform,
+      genre: item.genre,
+      year: item.year,
+      cover: item.cover,
+      coverIndex: item.coverIndex || 0,
+      rating: item.rating || 0,
+      isFavorite: item.isFavorite || false
+    }, target);
   };
 
-  const playlistItemFromGame = (game) => ({
-    title: game.title,
-    platform: game.platform,
-    genre: game.genre,
-    year: game.year,
-    cover: game.cover,
-    coverIndex: game.coverIndex || 0,
-    rating: game.rating || 0,
-    isFavorite: game.isFavorite || false,
-    originId: game.id,
-    sourceType: 'board'
-  });
-
-  const gameFromRaw = (raw) => ({
-    id: raw.id || `ext-${Date.now()}`,
-    title: raw.name,
-    platform: raw.platforms ? raw.platforms.map(p => p.platform.name).slice(0,2).join(', ') : 'Unknown',
-    genre: raw.genres?.[0]?.name || '',
-    year: raw.released?.split('-')[0] || '',
-    cover: raw.background_image,
-    coverIndex: 0,
-    rating: raw.rating || 0,
-    isFavorite: false
-  });
+  const gameFromRaw = createBoardGameFromRaw;
 
   const handleBrowseListAction = (rawGame, targetColId) => {
     const target = targetColId || data.columnOrder[0];
     const gameData = gameFromRaw(rawGame);
-    const existingId = findExistingGameIdByTitle(data, gameData.title);
-    let finalId = existingId;
+    const existingId = findExistingGameId(data, gameData);
     if (existingId) {
       const currentCol = getGameColumnId(data, existingId);
       if (currentCol === target) {
         if (!confirm(`Remove "${gameData.title}" from ${data.columns[currentCol]?.title || 'this list'}?`)) return;
-        save(prev => {
-          const newCols = { ...prev.columns };
-          newCols[currentCol] = { ...newCols[currentCol], itemIds: newCols[currentCol].itemIds.filter(id => id !== existingId) };
-          const newGames = { ...prev.games };
-          delete newGames[existingId];
-          return { ...prev, columns: newCols, games: newGames };
-        });
+        boardActions.removeGame(existingId);
       } else {
-        save(prev => {
-          const newCols = { ...prev.columns };
-          newCols[currentCol] = { ...newCols[currentCol], itemIds: newCols[currentCol].itemIds.filter(id => id !== existingId) };
-          newCols[target] = { ...newCols[target], itemIds: [existingId, ...newCols[target].itemIds] };
-          return { ...prev, columns: newCols };
-        });
+        boardActions.moveGame(existingId, target);
       }
     } else {
-      const newId = `g${Date.now()}`;
-      finalId = newId;
-      save(prev => ({
-        ...prev,
-        games: {
-          ...prev.games,
-          [newId]: { ...gameData, id: newId }
-        },
-        columns: {
-          ...prev.columns,
-          [target]: { ...prev.columns[target], itemIds: [newId, ...prev.columns[target].itemIds] }
-        }
-      }));
-    }
-    cleanGameDuplicates(finalId || gameData.id || `temp`, gameData.title, target);
-    setBrowseMenuGameId(null);
-    setBrowseMenuGame(null);
-  };
-
-  const handleBrowsePlaylistAction = async (rawGame, pl) => {
-    if (!pl?.id) return;
-    const item = playlistItemFromGame(gameFromRaw(rawGame));
-    try {
-      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', pl.id);
-      const snap = await getDoc(plRef);
-      if (!snap.exists()) throw new Error("Playlist not found");
-      const current = snap.data().items || [];
-      const exists = current.find(it => it.originId === item.id || it.title?.toLowerCase() === item.title.toLowerCase());
-      if (exists) {
-        if (!confirm(`Remove "${item.title}" from ${pl.title}?`)) return;
-        const updated = current.filter(it => !(it.originId === exists.originId || it.title === exists.title));
-        await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
-        setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
-      } else {
-        const updated = [...current, item];
-        await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
-        setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, items: updated } : p));
-      }
-    } catch (err) {
-      alert(err.message || "Failed to update playlist");
-    } finally {
-      setBrowseMenuGameId(null);
-      setBrowseMenuGame(null);
+      boardActions.addGameToBoard(gameData, target);
     }
   };
 
   const addGameToPlaylist = async (playlistId, game) => {
     if (!playlistId || !game) return;
     try {
-      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', playlistId);
-      const snap = await getDoc(plRef);
-      if (!snap.exists()) throw new Error("Playlist not found");
-      const current = snap.data().items || [];
-      const exists = current.some(item => item.originId === game.id || item.title === game.title);
-      if (exists) {
+      const result = await playlistActions.addGame(playlistId, game);
+      if (result.alreadyExists) {
         alert("Game already in playlist");
         return;
       }
-      const newItem = playlistItemFromGame(game);
-      const updatedItems = [...current, newItem];
-      await updateDoc(plRef, { items: updatedItems, updatedAt: serverTimestamp() });
-      setSelectedPlaylist(prev => prev?.id === playlistId ? { ...prev, items: updatedItems } : prev);
-      setPlaylists(prev => prev.map(pl => pl.id === playlistId ? { ...pl, items: updatedItems } : pl));
+      setSelectedPlaylist(prev => prev?.id === playlistId ? { ...prev, items: result.items } : prev);
     } catch (err) {
       console.error("Add to playlist failed", err);
       alert(err.message || "Failed to add to playlist");
@@ -728,39 +467,13 @@ export default function App() {
   };
 
   const createPlaceholderPlaylist = async (initialGame = null) => {
-    const baseName = 'New Playlist';
-    const suffix = myPlaylists.reduce((max, pl) => {
-      const m = pl.title && pl.title.match(/^New Playlist(?: \((\d+)\))?$/);
-      if (!m) return max;
-      const num = m[1] ? parseInt(m[1], 10) : 1;
-      return Number.isNaN(num) ? max : Math.max(max, num);
-    }, 0);
-    const nextIndex = suffix ? suffix + 1 : 1;
-    const title = nextIndex === 1 ? baseName : `${baseName} (${nextIndex})`;
-    setIsSavingPlaylist(true);
     try {
-      const payload = {
-        title,
-        description: '',
-        ownerUid: user?.uid || 'anon',
-        ownerName: user?.displayName || 'Guest',
-        privacy: 'public',
-        items: initialGame ? [playlistItemFromGame(initialGame)] : [],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      const ref = await addDoc(collection(db, 'artifacts', APP_ID, 'playlists'), payload);
-      const newPlaylist = { id: ref.id, ...payload };
+      const newPlaylist = await playlistActions.createPlaceholderPlaylist(initialGame);
       setSelectedPlaylist(newPlaylist);
       setIsPlaylistDetailOpen(true);
       setOpenPlaylistMenuId(null);
-      if (initialGame) {
-        await addGameToPlaylist(ref.id, initialGame);
-      }
     } catch (err) {
       alert(err.message || "Failed to create playlist");
-    } finally {
-      setIsSavingPlaylist(false);
     }
   };
 
@@ -773,56 +486,13 @@ export default function App() {
   const searchGames = async (e) => {
     if (e?.preventDefault) e.preventDefault();
     if (!searchQuery.trim()) return;
-    await fetchGamesWithVariants(searchQuery, {
-      onResults: setSearchResults,
-      onError: setSearchError,
-      setLoading: setIsSearching,
-    });
+    await runAddGameSearch(searchQuery);
   };
   const browseTopGames = async () => {
     setIsBrowsingGames(true);
     setBrowseGamesError(null);
-    setBrowseMenuGameId(null);
-    setBrowseMenuGame(null);
     try {
-      const params = new URLSearchParams();
-      params.append('ordering', browseFilters.ordering || '-metacritic');
-      params.append('page_size', browseFilters.page_size || 50);
-      if (browseFilters.platformId) params.append('platforms', browseFilters.platformId);
-      const startDate = browseFilters.year ? `${browseFilters.year}-01-01` : browseFilters.startDate;
-      const endDate = browseFilters.year ? `${browseFilters.year}-12-31` : browseFilters.endDate;
-      const datesStr = [startDate, endDate].filter(v => v).join(',');
-      if (datesStr) params.append('dates', datesStr);
-      if (browseSearch) params.append('search', browseSearch);
-      const res = await fetch(`${BACKEND_URL}?${params.toString()}`);
-      if (!res.ok) throw new Error("Browse failed");
-      const d = await res.json();
-      const now = new Date();
-      let deduped = [];
-      const seen = new Set();
-      (d.results || []).forEach(g => {
-        if (!g) return;
-        const key = g.slug || `${g.name || ''}-${g.released || ''}`;
-        if (seen.has(key)) return;
-        if (browseFilters.ordering === '-released' && g.released) {
-          const relDate = new Date(g.released);
-          if (relDate > now) return;
-        }
-        seen.add(key);
-        deduped.push(g);
-      });
-      // Client-side filters
-      if (browseFilters.minRating) {
-        deduped = deduped.filter(g => (g.rating || 0) >= browseFilters.minRating);
-      }
-      if (browseFilters.genreId) {
-        const gnorm = browseFilters.genreId.toString();
-        deduped = deduped.filter(g => (g.genres || []).some(gen => gen.id?.toString() === gnorm || gen.slug === gnorm));
-      }
-      if (browseFilters.year) {
-        deduped = deduped.filter(g => (g.released || '').startsWith(browseFilters.year.toString()));
-      }
-      setBrowseGamesResults(deduped);
+      setBrowseGamesResults(await browseGames({ filters: browseFilters, search: browseSearch }));
     } catch (err) {
       console.error("Browse games failed", err);
       setBrowseGamesError("Failed to load games.");
@@ -833,84 +503,39 @@ export default function App() {
   };
   
   const handleAddGameFromSearch = (g) => { 
-    const existingId = findExistingGameIdByTitle(data, g.name);
+    const existingId = findExistingGameId(data, g);
     if (existingId) {
       promptDuplicateMove(existingId);
       return;
     }
-    const newId = `g${Date.now()}`; 
     const target = zoomedColumnId || 'backlog'; 
-    
-    save(prev => {
-      const newGame = { 
-        id: newId, 
-        title: g.name, 
-        platform: g.platforms ? g.platforms.map(p=>p.platform.name).slice(0,2).join(', ') : 'Unk', 
-        genre: g.genres?.[0]?.name || 'Gen', 
-        year: g.released?.split('-')[0] || '', 
-        cover: g.background_image, 
-        coverIndex: 0, 
-        rating: 0, 
-        isFavorite: false 
-      };
-      
-      return { 
-        ...prev, 
-        games: { ...prev.games, [newId]: newGame }, 
-        columns: { 
-          ...prev.columns, 
-          [target]: { ...prev.columns[target], itemIds: [newId, ...prev.columns[target].itemIds] } 
-        } 
-      };
-    });
-    cleanGameDuplicates(newId, g.name, target);
+    const gameData = {
+      ...gameFromRaw(g),
+      platform: g.platforms ? g.platforms.map(p=>p.platform.name).slice(0,2).join(', ') : 'Unk',
+      genre: g.genres?.[0]?.name || 'Gen',
+      rating: 0,
+    };
+    boardActions.addGameToBoard(gameData, target);
     
     setIsAddModalOpen(false); 
-    setSearchQuery(''); 
-    setSearchResults([]); 
+    resetAddGameSearch();
   };
 
-  const fetchGameDetail = async (title) => {
-    if (!title) return;
-    setIsLoadingGameDetail(true);
-    setGameDetailError(null);
-    try {
-      await fetchGamesWithVariants(title, {
-        onResults: (res) => setSelectedGameDetail(res?.[0] || null),
-        onError: setGameDetailError,
-        setLoading: () => {}
-      });
-    } catch (err) {
-      console.error('Detail fetch failed', err);
-      setGameDetailError('Failed to load details');
-    } finally {
-      setIsLoadingGameDetail(false);
-    }
-  };
-
-  const openGameCard = (g, edit) => {
+  const openGameCard = (g) => {
     const mapped = g?.background_image ? gameFromRaw(g) : { ...g };
     setSelectedGame(mapped);
-    setSelectedGameDetail(null);
-    setIsGameCardEditing(edit);
+    resetGameDetailSearch();
     setIsGameCardOpen(true);
-    fetchGameDetail(mapped?.title);
-  };
-  
-  const handleSaveGameCard = (e) => { 
-    e.preventDefault(); 
-    if (!selectedGame) return; 
-    save(prev => ({ ...prev, games: { ...prev.games, [selectedGame.id]: selectedGame } })); 
-    setIsGameCardEditing(false); 
+    if (mapped?.title) runGameDetailSearch(mapped.title);
   };
   
   const handleModalFavoriteToggle = () => { 
     if (!selectedGame) return; 
-    const targetId = ensureGameOnBoard(selectedGame); 
+    const targetId = boardActions.ensureGameOnBoard(selectedGame); 
     const s = !(selectedGame.isFavorite); 
     setSelectedGame(p => ({ ...p, isFavorite: s, id: targetId || p?.id })); 
     if (!targetId) return;
-    save(prev => ({ ...prev, games: { ...prev.games, [targetId]: { ...prev.games[targetId], isFavorite: s } } })); 
+    boardActions.patchGame(targetId, { isFavorite: s });
   };
 
   const onDragStart = (e, id, c) => { setIsDragging(true); setDraggedItem({ gameId: id, sourceColId: c }); }; const onDragOver = (e, c) => { e.preventDefault(); if (activeDropZone !== c) setActiveDropZone(c); }; 
@@ -918,61 +543,18 @@ export default function App() {
   const onDrop = (e, d) => { 
     e.preventDefault(); setIsDragging(false); setActiveDropZone(null); 
     if (!draggedItem || draggedItem.sourceColId === d) return; 
-    const { gameId, sourceColId } = draggedItem; 
-    
-    save(prev => {
-      const s = prev.columns[sourceColId];
-      const f = prev.columns[d];
-      return { 
-        ...prev, 
-        columns: { 
-          ...prev.columns, 
-          [sourceColId]: { ...s, itemIds: s.itemIds.filter(i => i !== gameId) }, 
-          [d]: { ...f, itemIds: [...f.itemIds, gameId] } 
-        } 
-      };
-    });
-    cleanGameDuplicates(gameId, data.games[gameId]?.title, d);
+    const { gameId } = draggedItem; 
+    boardActions.moveGame(gameId, d);
   };
 
   const handleManualMove = (id, d) => { 
-    save(prev => {
-      const sKey = Object.keys(prev.columns).find(k => prev.columns[k].itemIds.includes(id)); 
-      if (!sKey || sKey === d) return prev; 
-      const start = prev.columns[sKey];
-      const finish = prev.columns[d];
-      return { 
-        ...prev, 
-        columns: { 
-          ...prev.columns, 
-          [sKey]: { ...start, itemIds: start.itemIds.filter(i => i !== id) }, 
-          [d]: { ...finish, itemIds: [...finish.itemIds, id] } 
-        } 
-      };
-    });
-    cleanGameDuplicates(id, data.games[id]?.title, d);
+    boardActions.moveGame(id, d);
   };
 
   const ensureGameOnBoard = (game, targetColId = data.columnOrder[0]) => {
-    if (!game) return null;
-    const existingId = game.id && data.games[game.id] ? game.id : findExistingGameIdByTitle(data, game.title);
-    if (existingId) return existingId;
-    const newId = `g${Date.now()}`;
-    const target = targetColId || data.columnOrder[0];
-    save(prev => ({
-      ...prev,
-      games: {
-        ...prev.games,
-        [newId]: { ...game, id: newId }
-      },
-      columns: {
-        ...prev.columns,
-        [target]: { ...prev.columns[target], itemIds: [newId, ...prev.columns[target].itemIds] }
-      }
-    }));
-    setSelectedGame(s => s ? { ...s, id: newId } : s);
-    cleanGameDuplicates(newId, game.title, target);
-    return newId;
+    const gameId = boardActions.ensureGameOnBoard(game, targetColId);
+    if (gameId) setSelectedGame(s => s ? { ...s, id: gameId } : s);
+    return gameId;
   };
 
   const handleSetGameRating = (val) => {
@@ -980,14 +562,8 @@ export default function App() {
     const targetId = ensureGameOnBoard(selectedGame);
     if (!targetId) return;
     setSelectedGame(prev => prev ? { ...prev, rating: val } : prev);
-    save(prev => ({
-      ...prev,
-      games: {
-        ...prev.games,
-        [targetId]: { ...prev.games[targetId], rating: val }
-      }
-    }));
-    cleanGameDuplicates(targetId, selectedGame.title, getGameColumnId(data, targetId));
+    boardActions.patchGame(targetId, { rating: val });
+    boardActions.cleanDuplicates(targetId, selectedGame.title, getGameColumnId(data, targetId));
   };
 
   const handleGameCardMove = (colId) => {
@@ -997,54 +573,14 @@ export default function App() {
   };
 
   const findPlaylistForGame = (game) => {
-    if (!game) return null;
-    return myPlaylists.find(pl => (pl.items || []).some(it => it.title?.toLowerCase() === game.title?.toLowerCase()));
-  };
-
-  const cleanGameDuplicates = (gameId, title, targetColId = null) => {
-    const norm = normalizeTitle(title);
-    if (!norm || !gameId) return;
-    save(prev => {
-      let games = { ...prev.games };
-      let columns = { ...prev.columns };
-      const dupIds = Object.values(games)
-        .filter(g => normalizeTitle(g.title) === norm && g.id !== gameId)
-        .map(g => g.id);
-
-      dupIds.forEach(id => {
-        Object.keys(columns).forEach(cid => {
-          if (columns[cid].itemIds.includes(id)) {
-            columns[cid] = { ...columns[cid], itemIds: columns[cid].itemIds.filter(x => x !== id) };
-          }
-        });
-        delete games[id];
-      });
-
-      if (targetColId) {
-        Object.keys(columns).forEach(cid => {
-          if (cid !== targetColId && columns[cid].itemIds.includes(gameId)) {
-            columns[cid] = { ...columns[cid], itemIds: columns[cid].itemIds.filter(x => x !== gameId) };
-          }
-        });
-        if (!columns[targetColId].itemIds.includes(gameId)) {
-          columns[targetColId] = { ...columns[targetColId], itemIds: [gameId, ...columns[targetColId].itemIds] };
-        }
-      }
-
-      return { ...prev, games, columns };
-    });
+    return findPlaylistForGameInList(myPlaylists, game);
   };
 
   const removeGameFromPlaylist = async (plId, game) => {
     if (!plId || !game) return;
     try {
-      const plRef = doc(db, 'artifacts', APP_ID, 'playlists', plId);
-      const snap = await getDoc(plRef);
-      if (!snap.exists()) return;
-      const current = snap.data().items || [];
-      const updated = current.filter(it => it.title?.toLowerCase() !== game.title?.toLowerCase());
-      await updateDoc(plRef, { items: updated, updatedAt: serverTimestamp() });
-      setPlaylists(prev => prev.map(p => p.id === plId ? { ...p, items: updated } : p));
+      const updated = await playlistActions.removeGame(plId, game);
+      setSelectedPlaylist(prev => prev?.id === plId ? { ...prev, items: updated } : prev);
     } catch (err) {
       console.error('Remove from playlist failed', err);
     }
@@ -1066,35 +602,19 @@ export default function App() {
   };
 
   const handleDeleteGame = (id) => { 
-    save(prev => {
-      const colKey = Object.keys(prev.columns).find(k => prev.columns[k].itemIds.includes(id));
-      const ng = { ...prev.games }; 
-      delete ng[id]; 
-      const nc = { ...prev.columns }; 
-      if (colKey) nc[colKey] = { ...nc[colKey], itemIds: nc[colKey].itemIds.filter(i => i !== id) }; 
-      return { ...prev, games: ng, columns: nc };
-    });
+    boardActions.removeGame(id);
   };
 
   const toggleFavorite = (id) => { 
-    save(prev => {
-      const g = prev.games[id]; 
-      if (!g) return prev;
-      return { ...prev, games: { ...prev.games, [id]: { ...g, isFavorite: !g.isFavorite } } };
-    });
+    boardActions.toggleFavorite(id);
   };
 
-  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: `col-${Date.now()}`, title: '', icon: 'gamepad' }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
+  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad' }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
   const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad' }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
   
   const handleSaveColumn = (e) => {
     e.preventDefault(); if (!columnForm.title.trim()) return; 
-    save(prev => {
-      let nd = { ...prev }; 
-      if (isEditingColumn) nd.columns[columnForm.id] = { ...nd.columns[columnForm.id], title: columnForm.title, icon: columnForm.icon }; 
-      else { nd.columns[columnForm.id] = { id: columnForm.id, title: columnForm.title, icon: columnForm.icon, itemIds: [] }; nd.columnOrder = [...nd.columnOrder, columnForm.id]; } 
-      return nd;
-    });
+    boardActions.saveColumn(columnForm, isEditingColumn);
     setIsColumnModalOpen(false); 
   };
 
@@ -1110,33 +630,12 @@ export default function App() {
 
     const dest = deleteMode === 'move' ? (deleteTarget || otherCols[0]) : null;
 
-    save(prev => {
-      const newOrder = prev.columnOrder.filter(id => id !== colId); 
-      const newCols = { ...prev.columns }; 
-      const itemsToMove = newCols[colId]?.itemIds || [];
-      let newGames = prev.games;
-
-      if (deleteMode === 'move' && dest && newCols[dest]) {
-        const deduped = itemsToMove.filter(id => !newCols[dest].itemIds.includes(id));
-        newCols[dest] = {
-          ...newCols[dest],
-          itemIds: [...deduped, ...newCols[dest].itemIds]
-        };
-      } else if (deleteMode === 'delete') {
-        newGames = { ...prev.games };
-        itemsToMove.forEach(id => { delete newGames[id]; });
-      }
-
-      delete newCols[colId]; 
-      return { ...prev, columnOrder: newOrder, columns: newCols, games: newGames };
-    });
+    boardActions.deleteColumn(colId, deleteMode, dest);
     setIsColumnModalOpen(false); 
   };
 
   const platforms = getUniquePlatforms(data);
   const showLanding = !isAuthLoading && !isDataLoading && user?.isAnonymous && (!data.games || Object.keys(data.games).length === 0);
-  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-
   return (
     <div className={`min-h-screen ${theme === 'light' ? 'theme-light' : 'theme-dark'} bg-[var(--bg)] text-[var(--text)] font-sans relative flex flex-col selection:bg-[var(--accent)] selection:text-[var(--panel)] transition-colors`}>
       <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 transition-opacity duration-300 ${saveStatus === 'idle' ? 'opacity-50 hover:opacity-100' : 'opacity-100'}`}>
@@ -1202,7 +701,7 @@ export default function App() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button
-              onClick={() => { setIsBrowseGamesModalOpen(true); browseTopGames(); }}
+              onClick={() => { setIsBrowsePage(true); browseTopGames(); }}
               className="p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
               aria-label="Browse games"
             >
@@ -1287,116 +786,31 @@ export default function App() {
                 >
                   <Search size={18} />
                 </button>
-                {isSearchBarOpen && (
-                  <div className="absolute right-0 mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl p-3 w-80 z-50">
-                    <div className="flex items-center gap-2 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => { setNavSearchMode('games'); setUserSearchResults([]); setUserSearchError(null); }}
-                        className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'games' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
-                      >
-                        Games
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setNavSearchMode('players'); setNavGameResults([]); setNavGameError(null); setNavGameHasSearched(false); }}
-                        className={`px-3 py-1 text-xs font-semibold rounded-full border ${navSearchMode === 'players' ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)]'}`}
-                      >
-                        Users
-                      </button>
-                    </div>
-                    <form onSubmit={handleUserSearch} className="relative">
-                      <Search className="absolute left-3 top-2.5 text-slate-500" size={16} />
-                      <input 
-                        type="text" 
-                        placeholder={navSearchMode === 'players' ? "Find players..." : "Find games..."}
-                        value={userSearchQuery}
-                      onChange={(e) => { 
-                        const val = e.target.value;
-                        setUserSearchQuery(val); 
-                        if (!val.trim()) { 
-                          setUserSearchResults([]); 
-                          setUserSearchError(null); 
-                          setNavGameResults([]); 
-                          setNavGameError(null); 
-                          setNavGameHasSearched(false); 
-                        }
-                      }}
-                      className="bg-[var(--panel)] border border-[var(--border)] rounded-full pl-9 pr-10 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] w-full outline-none placeholder:text-[var(--text-muted)]"
-                    />
-                    <button 
-                      type="submit"
-                      className="absolute right-2 top-1.5 p-1 bg-[var(--panel-muted)] rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-strong)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border)]"
-                    >
-                      {(navSearchMode === 'players' ? isSearchingUsers : isSearchingNavGames) ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                    </button>
-                    </form>
-                    {navSearchMode === 'players' && (userSearchQuery && (userSearchResults.length > 0 || userSearchError)) && (
-                      <div className="mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden">
-                      {userSearchError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{userSearchError}</div>}
-                      <div className="divide-y divide-[var(--border)] max-h-64 overflow-y-auto custom-scrollbar">
-                        {userSearchResults.map(res => (
-                          <div key={res.uid} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] rounded-lg cursor-pointer">
-                            <div className="w-8 h-8 rounded-full bg-[var(--panel-muted)] flex items-center justify-center font-bold text-xs uppercase text-[var(--text)]">{res.displayName?.[0]}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-bold text-[var(--text)] truncate">{res.displayName}</div>
-                              <div className="text-xs text-[var(--text-muted)] flex items-center gap-1">
-                                {res.privacy === 'invite_only' && <Lock size={10} />}
-                                {res.privacy === 'public' ? 'Public Profile' : 'Invite Only'}
-                              </div>
-                            </div>
-                            <button onClick={() => openProfile(res)} className="p-1.5 bg-[var(--panel-strong)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--panel-muted)] transition-colors border border-[var(--border)]" title="View profile">
-                              <Users size={14} />
-                            </button>
-                            <button onClick={() => handleFollowAction(res)} className="p-1.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Follow">
-                              <UserPlus size={14} />
-                            </button>
-                          </div>
-                        ))}
-                        {userSearchResults.length === 0 && !userSearchError && (
-                          <div className="p-3 text-xs text-[var(--text-muted)]">No players found.</div>
-                        )}
-                      </div>
-                      </div>
-                    )}
-                    {navSearchMode === 'games' && navGameHasSearched && (userSearchQuery && (navGameResults.length > 0 || navGameError || (!isSearchingNavGames && navGameResults.length === 0))) && (
-                      <div className="mt-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden">
-                      {navGameError && <div className="px-3 py-2 text-xs text-red-600 bg-red-100 border-b border-red-200">{navGameError}</div>}
-                      <div className="divide-y divide-[var(--border)] max-h-72 overflow-y-auto custom-scrollbar">
-                        {navGameResults.map(g => {
-                          const mapped = gameFromRaw(g);
-                          const existingId = findExistingGameIdByTitle(data, mapped.title);
-                          const alreadyOnBoard = !!existingId;
-                          return (
-                            <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 hover:bg-[var(--panel-muted)] transition-colors">
-                              <div
-                                className="w-12 h-12 rounded bg-[var(--panel-muted)] border border-[var(--border)] flex-shrink-0 overflow-hidden"
-                                style={{ backgroundImage: mapped.cover ? `url(${mapped.cover})` : PLACEHOLDER_COVERS[(mapped.coverIndex ?? 0) % PLACEHOLDER_COVERS.length], backgroundSize: 'cover', backgroundPosition: 'center' }}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-[var(--text)] truncate">{mapped.title}</div>
-                                <div className="text-[11px] text-[var(--text-muted)] truncate">
-                                  {(mapped.year || '').toString()} {mapped.year ? '·' : ''} {mapped.platform}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleBrowseListAction(g)}
-                                className={`text-xs px-3 py-1.5 rounded font-semibold ${alreadyOnBoard ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]'}`}
-                                disabled={alreadyOnBoard}
-                              >
-                                {alreadyOnBoard ? 'On board' : 'Add'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                        {!isSearchingNavGames && navGameResults.length === 0 && !navGameError && (
-                          <div className="p-3 text-xs text-[var(--text-muted)]">No games found.</div>
-                        )}
-                      </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <SearchDropdown
+                  isOpen={isSearchBarOpen}
+                  onClose={() => setIsSearchBarOpen(false)}
+                  navSearchMode={navSearchMode}
+                  setNavSearchMode={setNavSearchMode}
+                  userSearchQuery={userSearchQuery}
+                  setUserSearchQuery={setUserSearchQuery}
+                  userSearchResults={userSearchResults}
+                  userSearchError={userSearchError}
+                  isSearchingUsers={isSearchingUsers}
+                  navGameResults={navGameResults}
+                  navGameError={navGameError}
+                  isSearchingNavGames={isSearchingNavGames}
+                  navGameHasSearched={navGameHasSearched}
+                  setUserSearchResults={setUserSearchResults}
+                  setUserSearchError={setUserSearchError}
+                  setNavGameResults={setNavGameResults}
+                  setNavGameError={setNavGameError}
+                  setNavGameHasSearched={setNavGameHasSearched}
+                  handleUserSearch={handleUserSearch}
+                  handleFollowAction={handleFollowAction}
+                  openProfile={openProfile}
+                  handleBrowseListAction={handleBrowseListAction}
+                  data={data}
+                />
               </div>
             )}
             {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} />}
@@ -1495,359 +909,57 @@ export default function App() {
         </form>
       </Modal>
 
-      {!showLanding && !isDataLoading && !zoomedColumnId && !isFavoritesView && !isBrowsePage && platforms.length > 1 && (
-        <div className="fixed top-16 left-0 right-0 h-12 bg-[var(--glass)] backdrop-blur border-b border-[var(--border)] z-30 flex items-center justify-center px-4 overflow-x-auto">
-          <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
-            <Filter size={14} className="text-[var(--text-muted)] mr-2 shrink-0" />
-            <div className="flex-1 flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1">
-              {platforms.map(p => (
-                <button key={p} onClick={() => setActivePlatformFilter(p)} className={`px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${activePlatformFilter === p ? 'bg-[var(--accent)] text-white shadow-lg' : 'bg-[var(--panel)] text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)]'}`}>{p}</button>
-              ))}
-            </div>
-            {hiddenGamesCount > 0 && <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-[var(--border)] animate-in fade-in slide-in-from-left-2"><EyeOff size={14} className="text-[var(--text-muted)]" /><span className="text-xs text-[var(--text-muted)] font-medium whitespace-nowrap">{hiddenGamesCount} hidden</span></div>}
-          </div>
-        </div>
-      )}
-
-      <main className={`pb-10 px-4 md:px-8 min-h-screen overflow-x-hidden ${showLanding || isFavoritesView ? 'pt-24' : 'pt-32'} ${zoomedColumnId ? 'pt-24' : ''} ${isBrowsePage ? 'pt-28' : ''}`}>
+<main className={`pb-10 px-4 md:px-8 min-h-screen overflow-x-hidden ${showLanding ? 'pt-24' : isBrowsePage ? 'pt-28' : 'pt-32'}`}>
         {isDataLoading ? (
-          <div className="h-full flex items-center justify-center animate-in fade-in"><Loader2 size={40} className="animate-spin text-purple-600" /></div>
+          <div className="h-full flex items-center justify-center animate-in fade-in">
+            <Loader2 size={40} className="animate-spin text-purple-600" />
+          </div>
         ) : isBrowsePage ? (
-          <div className="max-w-6xl w-full mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-[var(--text)]">Browse Games</h2>
-              <button onClick={() => setIsBrowsePage(false)} className="text-sm text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1">
-                <ArrowLeft size={16} /> Back to board
-              </button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 bg-[var(--panel)] border border-[var(--border)] rounded-lg px-3 py-2">
-                <span className="text-[11px] uppercase text-[var(--text-muted)]">Browse by</span>
-                <select
-                  value={browseFilters.year}
-                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, year: e.target.value }))}
-                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
-                >
-                  <option value="">Any year</option>
-                  {Array.from({ length: 35 }, (_, i) => 2025 - i).map(y => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-                <select
-                  value={browseFilters.minRating}
-                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, minRating: Number(e.target.value) }))}
-                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
-                >
-                  <option value={0}>Any rating</option>
-                  <option value={9}>9+</option>
-                  <option value={8}>8+</option>
-                  <option value={7}>7+</option>
-                  <option value={6}>6+</option>
-                </select>
-                <select
-                  value={browseFilters.ordering}
-                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, ordering: e.target.value }))}
-                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
-                >
-                  <option value="-metacritic">Popular (Metacritic)</option>
-                  <option value="-rating">Popular (User)</option>
-                  <option value="-added">Most added</option>
-                  <option value="-released">Newest</option>
-                </select>
-                <select
-                  value={browseFilters.genreId}
-                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, genreId: e.target.value }))}
-                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
-                >
-                  <option value="">All genres</option>
-                  <option value="4">Action</option>
-                  <option value="3">Adventure</option>
-                  <option value="5">RPG</option>
-                  <option value="2">Shooter</option>
-                  <option value="7">Puzzle</option>
-                  <option value="14">Simulator</option>
-                </select>
-                <select
-                  value={browseFilters.platformId}
-                  onChange={(e) => setBrowseFilters(prev => ({ ...prev, platformId: e.target.value }))}
-                  className="bg-transparent text-sm text-[var(--text)] border border-[var(--border)] rounded px-2 py-1"
-                >
-                  <option value="">All platforms</option>
-                  <option value="4">PC</option>
-                  <option value="187">PlayStation 5</option>
-                  <option value="18">PlayStation 4</option>
-                  <option value="1">Xbox One</option>
-                  <option value="186">Xbox Series X/S</option>
-                  <option value="7">Nintendo Switch</option>
-                </select>
-              </div>
-              <div className="flex-1 flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={16} />
-                  <input
-                    value={browseSearch}
-                    onChange={(e) => setBrowseSearch(e.target.value)}
-                    placeholder="Find a game..."
-                    className="w-full bg-[var(--panel)] border border-[var(--border)] rounded-lg pl-9 pr-3 py-2 text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
-                  />
-                </div>
-                <button
-                  onClick={browseTopGames}
-                  disabled={isBrowsingGames}
-                  className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm rounded disabled:opacity-60"
-                >
-                  {isBrowsingGames ? 'Loading...' : 'Browse'}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide">Popular picks</h3>
-              {browseGamesError && <div className="text-xs text-red-500">{browseGamesError}</div>}
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              {browseGamesResults.slice(0,5).map((game) => {
-                const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
-                const exists = boardMatches.length > 0;
-                return (
-                  <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm flex flex-col">
-                    <div
-                      className="aspect-[2/3] bg-cover bg-center relative"
-                      style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
-                    >
-                      {!game.background_image && (
-                        <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>
-                      )}
-                      {exists && (
-                        <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/40 text-white text-[11px] flex items-center gap-1">
-                          <Check size={12} /> On your library
-                        </div>
-                      )}
-                      <button
-                        className="absolute top-2 right-2 p-1.5 bg-[var(--panel)]/80 text-[var(--text)] rounded-full border border-[var(--border)] hover:border-[var(--accent)]"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleBrowseListAction(game, data.columnOrder[0]);
-                        }}
-                        title="Add to board list"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                      <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
-                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-2">
-                        <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
-                        {game.metacritic && (
-                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>
-                        )}
-                        {game.rating && (
-                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)] flex items-center gap-1">
-                            <Star size={12} /> {game.rating.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        {exists ? (
-                          <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
-                            On board
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleBrowseListAction(game)}
-                            className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
-                          >
-                            Add
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between mt-2">
-              <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide">More results</h3>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 flex-1 overflow-y-auto custom-scrollbar">
-              {browseGamesResults.slice(5).map((game) => {
-                const boardMatches = data.columnOrder.filter(cid => data.columns[cid].itemIds.some(id => data.games[id]?.title?.toLowerCase() === game.name.toLowerCase()));
-                const exists = boardMatches.length > 0;
-                return (
-                  <div key={game.id} className="bg-[var(--panel)] border border-[var(--border)] rounded-lg overflow-hidden shadow-sm flex flex-col">
-                    <div
-                      className="aspect-[2/3] bg-cover bg-center relative"
-                      style={{ backgroundImage: game.background_image ? `url(${game.background_image})` : 'none' }}
-                    >
-                      {!game.background_image && (
-                        <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)] text-xs">No cover</div>
-                      )}
-                      {exists && (
-                        <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/40 text-white text-[11px] flex items-center gap-1">
-                          <Check size={12} /> On your library
-                        </div>
-                      )}
-                      <button
-                        className="absolute top-2 right-2 p-1.5 bg-[var(--panel)]/80 text-[var(--text)] rounded-full border border-[var(--border)] hover:border-[var(--accent)]"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleBrowseListAction(game, data.columnOrder[0]);
-                        }}
-                        title="Add to board list"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                      <div className="text-sm font-semibold text-[var(--text)] truncate">{game.name}</div>
-                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-2">
-                        <span>{game.released ? game.released.split('-')[0] : 'Unknown'}</span>
-                        {game.metacritic && (
-                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)]">{game.metacritic}</span>
-                        )}
-                        {game.rating && (
-                          <span className="px-1.5 rounded bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)] flex items-center gap-1">
-                            <Star size={12} /> {game.rating.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        {exists ? (
-                          <span className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--panel-muted)] text-[var(--text-muted)] border border-[var(--border)]">
-                            On board
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleBrowseListAction(game)}
-                            className="text-[11px] px-3 py-1.5 rounded-full bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
-                          >
-                            Add
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {!isBrowsingGames && browseGamesResults.length === 0 && (
-                <div className="text-sm text-[var(--text-muted)] col-span-full">No games to display.</div>
-              )}
-            </div>
-          </div>
+          <BrowsePage
+            filters={browseFilters}
+            setFilters={setBrowseFilters}
+            search={browseSearch}
+            setSearch={setBrowseSearch}
+            isLoading={isBrowsingGames}
+            error={browseGamesError}
+            results={browseGamesResults}
+            data={data}
+            playlists={myPlaylists}
+            onBrowse={browseTopGames}
+            onAddToList={handleBrowseListAction}
+            onBack={() => setIsBrowsePage(false)}
+          />
         ) : showLanding ? (
-          <LandingPage theme={theme} onStart={() => setIsAddModalOpen(true)} onLogin={handleLogin} />
-        ) : isFavoritesView ? (
-          <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
-            <div className="flex items-center justify-between mb-6">
-              <button onClick={() => setIsFavoritesView(false)} className="flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
-                <ArrowLeft size={20} />
-                <span className="font-semibold">Back to Board</span>
-              </button>
-            </div>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-red-100 text-red-500 dark:bg-red-500/20 dark:text-red-400">
-                <Heart size={32} className="fill-current" />
-              </div>
-              <div>
-                <h2 className="text-3xl font-bold text-[var(--text)]">Favorites Vault</h2>
-                <p className="text-[var(--text-muted)] text-sm">{favoriteGames.length} cherished titles</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl-grid-cols-5 gap-6">
-              {favoriteGames.map(game => <GridGameCard key={game.id} game={game} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEdit={openGameCard} onToggleFavorite={toggleFavorite} />)}
-            </div>
-            {favoriteGames.length === 0 && (
-              <div className="h-64 flex flex-col items-center justify-center text-[var(--text-muted)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--panel)]/30">
-                <Heart size={32} className="mb-4 opacity-50" />
-                <span className="text-lg">No favorites yet. Add some love!</span>
-              </div>
-            )}
-          </div>
-        ) : zoomedColumnId ? (
-          <div className="max-w-7xl mx-auto animate-in zoom-in-95 duration-300">
-            <div className="flex items-center justify-between mb-6">
-              <button onClick={() => setZoomedColumnId(null)} className="flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"><ArrowLeft size={20} /><span className="font-semibold">Back to Board</span></button>
-              <div className="flex bg-[var(--panel)] border border-[var(--border)] rounded-lg p-1 shadow-sm">{data.columnOrder.map(colId => <button key={colId} onClick={() => setZoomedColumnId(colId)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${colId === zoomedColumnId ? 'bg-[var(--accent)] text-white shadow' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>{data.columns[colId].title}</button>)}</div>
-            </div>
-            <div className="flex items-center gap-3 mb-6">
-              <div className={`p-3 rounded-xl ${zoomedColumnId === 'backlog' ? 'bg-[var(--panel-muted)] text-[var(--text-muted)]' : zoomedColumnId === 'playing' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400' : 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400'}`}><IconRenderer iconName={data.columns[zoomedColumnId].icon} size={32} /></div>
-              <div><div className="flex items-center gap-3"><h2 className="text-3xl font-bold text-[var(--text)]">{data.columns[zoomedColumnId].title}</h2><button onClick={() => openEditColumnModal(data.columns[zoomedColumnId])} className="p-1.5 hover:bg-[var(--panel-muted)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"><Pencil size={18} /></button></div><p className="text-[var(--text-muted)] text-sm">{data.columns[zoomedColumnId].itemIds.length} games in total</p></div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-              {data.columns[zoomedColumnId].itemIds.filter(id => { if (activePlatformFilter === 'All') return true; return data.games[id]?.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase()); }).map(gameId => <GridGameCard key={gameId} game={data.games[gameId]} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEdit={openGameCard} onToggleFavorite={toggleFavorite} />)}
-            </div>
-            {data.columns[zoomedColumnId].itemIds.length === 0 && <div className="h-64 flex flex-col items-center justify-center text-[var(--text-muted)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--panel)]/30"><GripVertical size={32} className="mb-4 opacity-50" /><span className="text-lg">No games here yet</span></div>}
-          </div>
+          <LandingPage
+            theme={theme}
+            onStart={() => setIsAddModalOpen(true)}
+            onLogin={handleLogin}
+          />
         ) : (
-          isListView ? (
-          <div className="max-w-6xl mx-auto px-4">
-              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-xl overflow-hidden shadow-sm">
-                <div className="px-4 py-3 border-b border-[var(--border)] text-xs uppercase text-[var(--text-muted)] tracking-wide">All Games</div>
-                <div className="divide-y divide-[var(--border)]">
-                  {Object.values(data.games)
-                    .filter(g => activePlatformFilter === 'All' || g.platform?.toLowerCase().includes(activePlatformFilter.toLowerCase()))
-                    .map(game => {
-                      const colId = data.columnOrder.find(c => data.columns[c].itemIds.includes(game.id)) || 'unknown';
-                      return (
-                        <div key={game.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 hover:bg-[var(--panel-muted)] transition-colors">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-16 rounded-md bg-[var(--panel-muted)] overflow-hidden bg-cover bg-center border border-[var(--border)]" style={{ background: game.cover ? `url(${game.cover}) center/cover` : PLACEHOLDER_COVERS[(game.coverIndex ?? 0) % PLACEHOLDER_COVERS.length] }} />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm font-semibold text-[var(--text)] truncate">{game.title}</div>
-                                {game.rating > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--panel-muted)] text-[var(--text)] border border-[var(--border)]">{game.rating}/10</span>}
-                              </div>
-                              <div className="text-xs text-[var(--text-muted)] truncate">{game.platform} · {game.genre}</div>
-                              <div className="text-[11px] text-[var(--text-muted)] mt-1">List: {data.columns[colId]?.title || 'Unknown'}</div>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 ml-auto">
-                            <button onClick={() => save(prev => ({ ...prev, games: { ...prev.games, [game.id]: { ...prev.games[game.id], isFavorite: !game.isFavorite } } }))} className={`p-2 rounded-md border ${game.isFavorite ? 'bg-red-100 text-red-600 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/50' : 'bg-[var(--panel)] text-[var(--text-muted)] border-[var(--border)] hover:text-red-500 hover:border-red-300'}`} title="Favorite">
-                              <Heart size={16} className={game.isFavorite ? 'fill-current' : ''} />
-                            </button>
-                            <button onClick={() => openGameCard(game, false)} className="p-2 rounded-md bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]" title="Open">
-                              <Pencil size={16} />
-                            </button>
-                            <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                              {data.columnOrder.map(cid => (
-                                <button key={cid} onClick={() => handleManualMove(game.id, cid)} className={`px-2 py-1 rounded border text-[var(--text-muted)] ${cid === colId ? 'border-[var(--border)] bg-[var(--panel-muted)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--text)]'}`}>
-                                  {data.columns[cid].title}
-                                </button>
-                              ))}
-                            </div>
-                            <button onClick={() => handleDeleteGame(game.id)} className="p-2 rounded-md bg-[var(--panel)] text-red-600 border border-[var(--border)] hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900/30" title="Delete">
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  {Object.keys(data.games).length === 0 && (
-                    <div className="px-4 py-6 text-sm text-[var(--text-muted)] text-center">No games yet.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex justify-center h-full"> 
-              <div className="flex flex-col md:flex-row gap-6 items-start h-full overflow-x-auto pb-4 animate-in fade-in duration-500 max-w-full w-fit mx-auto px-4">
-      {data.columnOrder.map((colId) => <Column key={colId} column={data.columns[colId]} games={data.games} isDraggingOver={activeDropZone === colId} onDragOver={onDragOver} onDrop={onDrop} onDragStart={onDragStart} onMoveRequest={handleManualMove} onDelete={handleDeleteGame} onEditGame={openGameCard} onToggleFavorite={toggleFavorite} filterPlatform={activePlatformFilter} onHeaderClick={setZoomedColumnId} onEditColumn={openEditColumnModal} playlists={myPlaylists} onAddToPlaylist={addGameToPlaylist} onCreatePlaylistAndAdd={createPlaceholderPlaylist} />)}
-                {data.columnOrder.length < 5 && (
-                  <div className="shrink-0 w-80 p-4">
-                    <button
-                      onClick={openAddColumnModal}
-                      className="w-full h-32 border-2 border-dashed border-[var(--border)] rounded-xl flex flex-col items-center justify-center text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--panel-muted)] transition-all group bg-[var(--panel)]"
-                    >
-                      <Plus size={32} className="mb-2 group-hover:scale-110 transition-transform" />
-                      <span className="font-semibold">Create List</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
+          <BoardPage
+            data={data}
+            favoriteGames={favoriteGames}
+            platforms={platforms}
+            hiddenGamesCount={hiddenGamesCount}
+            viewMode={{ isListView, isFavoritesView, zoomedColumnId }}
+            setViewMode={{ setIsListView, setIsFavoritesView, setZoomedColumnId }}
+            filters={{ activePlatformFilter, setActivePlatformFilter }}
+            actions={{
+              handleManualMove,
+              handleDeleteGame,
+              openGameCard,
+              toggleFavorite,
+              onDragOver,
+              onDrop,
+              onDragStart,
+              activeDropZone,
+              openAddColumnModal,
+              openEditColumnModal,
+            }}
+            playlists={myPlaylists}
+            onAddToPlaylist={addGameToPlaylist}
+            onCreatePlaylistAndAdd={createPlaceholderPlaylist}
+          />
         )}
       </main>
 
@@ -2036,7 +1148,7 @@ export default function App() {
           {searchError && <div className="p-3 bg-red-100 border border-red-200 rounded-lg text-red-700 text-sm">{searchError}</div>}
           <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
             {searchResults.map(game => {
-              const exists = findExistingGameIdByTitle(data, game.name);
+              const exists = findExistingGameId(data, game);
               return (
                 <div
                   key={game.id}
@@ -2075,7 +1187,7 @@ export default function App() {
                 </div>
               );
             })}
-            {!isSearching && searchQuery.trim() && searchResults.length === 0 && (
+            {!isSearching && searchHasSearched && searchQuery.trim() && searchResults.length === 0 && (
               <div className="text-sm text-[var(--text-muted)] px-2 py-2">No results found.</div>
             )}
           </div>
@@ -2335,7 +1447,7 @@ export default function App() {
                         {playlistSearchQuery && (
                           <button
                             type="button"
-                            onClick={() => { setPlaylistSearchQuery(''); setPlaylistSearchResults([]); }}
+                            onClick={resetPlaylistGameSearch}
                             className="absolute right-2 top-2 text-[var(--text-muted)] hover:text-[var(--text)]"
                             aria-label="Clear search"
                           >
@@ -2357,14 +1469,12 @@ export default function App() {
                       {isSearchingPlaylistGames && (
                         <div className="text-sm text-[var(--text-muted)]">Searching games...</div>
                       )}
-                      {!isSearchingPlaylistGames && playlistSearchQuery.trim() && playlistSearchResults.length === 0 && (
+                      {!isSearchingPlaylistGames && playlistSearchHasSearched && playlistSearchQuery.trim() && playlistSearchResults.length === 0 && (
                         <div className="text-sm text-[var(--text-muted)]">No results found.</div>
                       )}
                       {playlistSearchResults.map((g) => {
                         const mapped = gameFromRaw(g);
-                        const exists = (selectedPlaylist.items || []).some(
-                          it => it.title?.toLowerCase() === mapped.title.toLowerCase()
-                        );
+                        const exists = (selectedPlaylist.items || []).some((item) => sameGameIdentity(item, mapped));
                         return (
                           <div key={g.id || mapped.title} className="flex items-center gap-3 p-2 rounded border border-[var(--border)] bg-[var(--panel)]">
                             <div
@@ -2380,7 +1490,7 @@ export default function App() {
                             <button
                               onClick={() => {
                                 if (exists) {
-                                  const idx = (selectedPlaylist.items || []).findIndex(it => it.title?.toLowerCase() === mapped.title.toLowerCase());
+                                  const idx = (selectedPlaylist.items || []).findIndex((item) => sameGameIdentity(item, mapped));
                                   if (idx > -1) handleRemovePlaylistItem(selectedPlaylist, idx);
                                 } else {
                                   addGameToPlaylist(selectedPlaylist.id, mapped);

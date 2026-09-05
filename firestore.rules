@@ -1,8 +1,290 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function hasVisibleProfile(appId, uid) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/public_profiles/$(uid)) &&
+        get(/databases/$(database)/documents/artifacts/$(appId)/public_profiles/$(uid)).data.privacy in ["public", "invite_only"];
+    }
+
+    function profilePrivacy(appId, uid) {
+      return get(/databases/$(database)/documents/artifacts/$(appId)/public_profiles/$(uid)).data.privacy;
+    }
+
+    function validPrivacy(value) {
+      return value in ["public", "invite_only", "private"];
+    }
+
+    function validPlaylistPrivacy(value) {
+      return value in ["public", "private"];
+    }
+
+    function validString(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function validOptionalString(data, field, maxLength) {
+      return !(field in data) || validString(data[field], maxLength);
+    }
+
+    function validOptionalNumber(data, field) {
+      return !(field in data) || data[field] is number;
+    }
+
+    function validSearchTokens(tokens) {
+      return tokens is list &&
+        tokens.size() <= 80 &&
+        (tokens.size() == 0 || validString(tokens[0], 20)) &&
+        (tokens.size() <= 1 || validString(tokens[tokens.size() - 1], 20));
+    }
+
+    function validBoard(data) {
+      return data.keys().hasOnly(["games", "columns", "columnOrder"]) &&
+        data.games is map &&
+        data.columns is map &&
+        data.columnOrder is list &&
+        data.games.keys().size() <= 500 &&
+        data.columns.keys().size() <= 5 &&
+        data.columnOrder.size() <= 5;
+    }
+
+    function validSettings(data) {
+      return data.keys().hasOnly(["privacy", "bio", "displayName"]) &&
+        (!("privacy" in data) || validPrivacy(data.privacy)) &&
+        validOptionalString(data, "bio", 500) &&
+        validOptionalString(data, "displayName", 80);
+    }
+
+    function validUserDataDoc(docId, data) {
+      return (docId == "board" && validBoard(data)) ||
+        (docId == "settings" && validSettings(data));
+    }
+
+    function validPublicProfile(profileId, data) {
+      return data.keys().hasOnly([
+          "uid",
+          "displayName",
+          "displayNameLower",
+          "searchTokens",
+          "photoURL",
+          "privacy",
+          "bio"
+        ]) &&
+        (!("uid" in data) || data.uid == profileId) &&
+        ("privacy" in data && validPrivacy(data.privacy)) &&
+        validOptionalString(data, "displayName", 80) &&
+        validOptionalString(data, "displayNameLower", 80) &&
+        (!("searchTokens" in data) || validSearchTokens(data.searchTokens)) &&
+        validOptionalString(data, "photoURL", 1000) &&
+        validOptionalString(data, "bio", 500);
+    }
+
+    function validPlaylistItem(item) {
+      return item is map &&
+        item.keys().hasOnly([
+          "title",
+          "platform",
+          "genre",
+          "year",
+          "cover",
+          "coverIndex",
+          "rating",
+          "isFavorite",
+          "boardGameId",
+          "rawgId",
+          "rawgSlug",
+          "originId",
+          "originRawgId",
+          "originRawgSlug",
+          "sourceType"
+        ]) &&
+        validOptionalString(item, "title", 160) &&
+        validOptionalString(item, "platform", 160) &&
+        validOptionalString(item, "genre", 80) &&
+        validOptionalString(item, "year", 10) &&
+        validOptionalString(item, "cover", 1200) &&
+        validOptionalString(item, "boardGameId", 120) &&
+        validOptionalString(item, "rawgId", 40) &&
+        validOptionalString(item, "rawgSlug", 160) &&
+        validOptionalString(item, "originId", 120) &&
+        validOptionalString(item, "originRawgId", 40) &&
+        validOptionalString(item, "originRawgSlug", 160) &&
+        validOptionalString(item, "sourceType", 40) &&
+        validOptionalNumber(item, "coverIndex") &&
+        validOptionalNumber(item, "rating") &&
+        (!("isFavorite" in item) || item.isFavorite is bool);
+    }
+
+    function validPlaylistItems(items) {
+      return items is list &&
+        items.size() <= 250 &&
+        (items.size() == 0 || validPlaylistItem(items[0])) &&
+        (items.size() <= 1 || validPlaylistItem(items[items.size() - 1]));
+    }
+
+    function validPlaylistCreate(data) {
+      return data.keys().hasOnly([
+          "title",
+          "description",
+          "ownerUid",
+          "ownerName",
+          "privacy",
+          "items",
+          "createdAt",
+          "updatedAt"
+        ]) &&
+        data.ownerUid == request.auth.uid &&
+        validString(data.title, 120) &&
+        validOptionalString(data, "description", 1000) &&
+        validOptionalString(data, "ownerName", 80) &&
+        validPlaylistPrivacy(data.privacy) &&
+        validPlaylistItems(data.items) &&
+        data.createdAt == request.time &&
+        data.updatedAt == request.time;
+    }
+
+    function validPlaylistUpdate(before, after) {
+      return after.keys().hasOnly([
+          "title",
+          "description",
+          "ownerUid",
+          "ownerName",
+          "privacy",
+          "items",
+          "createdAt",
+          "updatedAt"
+        ]) &&
+        before.ownerUid == request.auth.uid &&
+        after.ownerUid == before.ownerUid &&
+        after.createdAt == before.createdAt &&
+        validString(after.title, 120) &&
+        validOptionalString(after, "description", 1000) &&
+        validOptionalString(after, "ownerName", 80) &&
+        validPlaylistPrivacy(after.privacy) &&
+        validPlaylistItems(after.items) &&
+        after.updatedAt == request.time;
+    }
+
+    function validRelationshipType(relationshipType) {
+      return relationshipType in ["following", "followers", "requests", "blocked"];
+    }
+
+    function validRelationshipBase(data, profileId) {
+      return data.uid == profileId &&
+        validOptionalString(data, "displayName", 80) &&
+        validOptionalString(data, "photoURL", 1000);
+    }
+
+    function validFollowing(appId, userId, profileId, data) {
+      return userId == request.auth.uid &&
+        userId != profileId &&
+        hasVisibleProfile(appId, profileId) &&
+        data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "updatedAt"]) &&
+        validRelationshipBase(data, profileId) &&
+        (
+          (data.status == "following" && profilePrivacy(appId, profileId) == "public") ||
+          (data.status == "pending" && profilePrivacy(appId, profileId) == "invite_only")
+        ) &&
+        data.updatedAt == request.time;
+    }
+
+    function validFollowers(appId, userId, profileId, data) {
+      return profileId == request.auth.uid &&
+        userId != profileId &&
+        hasVisibleProfile(appId, userId) &&
+        profilePrivacy(appId, userId) == "public" &&
+        data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "updatedAt"]) &&
+        validRelationshipBase(data, profileId) &&
+        data.status == "following" &&
+        data.updatedAt == request.time;
+    }
+
+    function validRequests(appId, userId, profileId, data) {
+      return profileId == request.auth.uid &&
+        userId != profileId &&
+        hasVisibleProfile(appId, userId) &&
+        profilePrivacy(appId, userId) == "invite_only" &&
+        data.keys().hasOnly(["uid", "displayName", "photoURL", "status", "createdAt"]) &&
+        validRelationshipBase(data, profileId) &&
+        data.status == "pending" &&
+        data.createdAt == request.time;
+    }
+
+    function validBlocked(userId, profileId, data) {
+      return userId == request.auth.uid &&
+        userId != profileId &&
+        data.keys().hasOnly(["uid", "displayName", "photoURL", "blockedAt"]) &&
+        validRelationshipBase(data, profileId) &&
+        data.blockedAt == request.time;
+    }
+
+    function validRelationshipWrite(appId, userId, relationshipType, profileId, data) {
+      return validRelationshipType(relationshipType) &&
+        (
+          (relationshipType == "following" && validFollowing(appId, userId, profileId, data)) ||
+          (relationshipType == "followers" && validFollowers(appId, userId, profileId, data)) ||
+          (relationshipType == "requests" && validRequests(appId, userId, profileId, data)) ||
+          (relationshipType == "blocked" && validBlocked(userId, profileId, data))
+        );
+    }
+
+    function validRelationshipDelete(userId, relationshipType, profileId) {
+      return validRelationshipType(relationshipType) &&
+        userId != profileId &&
+        (
+          ((relationshipType == "following" || relationshipType == "followers") &&
+            (userId == request.auth.uid || profileId == request.auth.uid)) ||
+          (relationshipType == "requests" &&
+            (userId == request.auth.uid || profileId == request.auth.uid)) ||
+          (relationshipType == "blocked" && userId == request.auth.uid)
+        );
+    }
+
+    match /artifacts/{appId} {
+      match /users/{userId}/data/{docId} {
+        allow read: if isOwner(userId) || (docId == "board" && hasVisibleProfile(appId, userId));
+        allow create, update: if isOwner(userId) &&
+          validUserDataDoc(docId, request.resource.data);
+        allow delete: if isOwner(userId) && docId in ["board", "settings"];
+      }
+
+      match /public_profiles/{profileId} {
+        allow get, list: if isOwner(profileId) ||
+          resource.data.privacy in ["public", "invite_only"];
+        allow create, update: if isOwner(profileId) &&
+          validPublicProfile(profileId, request.resource.data);
+        allow delete: if isOwner(profileId);
+      }
+
+      match /playlists/{playlistId} {
+        allow get, list: if signedIn() &&
+          (resource.data.ownerUid == request.auth.uid || resource.data.privacy == "public");
+        allow create: if signedIn() &&
+          validPlaylistCreate(request.resource.data);
+        allow update: if signedIn() &&
+          resource.data.ownerUid == request.auth.uid &&
+          validPlaylistUpdate(resource.data, request.resource.data);
+        allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      }
+
+      match /relationships/{userId}/{relationshipType}/{profileId} {
+        allow read: if isOwner(userId) && validRelationshipType(relationshipType);
+        allow create, update: if signedIn() &&
+          validRelationshipWrite(appId, userId, relationshipType, profileId, request.resource.data);
+        allow delete: if signedIn() &&
+          validRelationshipDelete(userId, relationshipType, profileId);
+      }
+    }
+
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

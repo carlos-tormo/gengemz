@@ -3,7 +3,7 @@ import { MoreVertical, ImageIcon, Trash2, Heart, Star } from 'lucide-react';
 import useClickOutside from '../hooks/useClickOutside';
 import { PLACEHOLDER_COVERS } from '../config/constants';
 
-const GameCard = ({ game, index, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite, playlists, onAddToPlaylist, onCreatePlaylistAndAdd }) => {
+const GameCard = ({ game, columnId, onDragStart, onMoveRequest, onDelete, onEdit, onToggleFavorite, playlists, onAddToPlaylist, onCreatePlaylistAndAdd }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
   const menuRef = useRef(null);

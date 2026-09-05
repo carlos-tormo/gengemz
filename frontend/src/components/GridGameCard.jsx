@@ -3,7 +3,7 @@ import { MoreVertical, ImageIcon, Heart, Star } from 'lucide-react';
 import useClickOutside from '../hooks/useClickOutside';
 import { PLACEHOLDER_COVERS } from '../config/constants';
 
-const GridGameCard = ({ game, onMoveRequest, onDelete, onEdit, onToggleFavorite }) => {
+const GridGameCard = ({ game, onDelete, onEdit, onToggleFavorite }) => {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   useClickOutside(menuRef, () => setShowMenu(false));
