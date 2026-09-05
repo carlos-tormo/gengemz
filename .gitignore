@@ -73,3 +73,5 @@ dist
 .env
 .DS_Store
 .env.local
+# local scratch
+_to_delete/
