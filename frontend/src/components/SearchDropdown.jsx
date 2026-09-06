@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Search, Loader2, Gamepad2, Users, Plus, Check } from "lucide-react";
 import { findExistingGameId } from "../utils/gameUtils";
 
@@ -30,7 +30,16 @@ const SearchDropdown = ({
   openProfile,
   handleBrowseListAction,
   data = {},
+  currentUid,
+  relationships = {},
+  friends = [],
 }) => {
+  // S6: people results say where you already stand with each player instead of
+  // offering a bare "Follow" that may be a no-op.
+  const friendUids = useMemo(() => new Set(friends.map((friend) => friend.uid)), [friends]);
+  const following = relationships.following || {};
+  const followers = relationships.followers || {};
+
   if (!isOpen) return null;
 
   const renderGameRow = (g) => {
@@ -77,36 +86,71 @@ const SearchDropdown = ({
     );
   };
 
-  const renderUserRow = (u) => (
-    <div
-      key={u.uid}
-      className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--panel)] transition-colors"
-    >
-      <div className="w-10 h-10 rounded-full bg-[var(--panel-strong)] text-[var(--text)] grid place-items-center font-bold uppercase flex-shrink-0">
-        {(u.displayName || "U")[0]}
+  const renderUserRow = (u) => {
+    const followEntry = following[u.uid];
+    const isFriend = friendUids.has(u.uid);
+    const isSelf = !!currentUid && u.uid === currentUid;
+    // Your side of the relationship first: a pending request and an accepted
+    // follow both outrank "they follow you", which is what the button acts on.
+    const subtitle = isSelf
+      ? "This is you"
+      : isFriend
+        ? "You follow each other"
+        : followEntry?.status === "pending"
+          ? "Request sent"
+          : followEntry
+            ? "Following"
+            : followers[u.uid]
+              ? "Follows you"
+              : "Public profile";
+    const followLabel = followEntry
+      ? (followEntry.status === "pending" ? "Cancel" : "Unfollow")
+      : "Follow";
+
+    return (
+      <div
+        key={u.uid}
+        className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--panel)] transition-colors"
+      >
+        <div className="w-10 h-10 rounded-full bg-[var(--panel-strong)] text-[var(--text)] grid place-items-center font-bold uppercase flex-shrink-0">
+          {(u.displayName || "U")[0]}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-[var(--text)] truncate">
+              {u.displayName || "Unknown"}
+            </p>
+            {isFriend && (
+              <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/40">
+                Friend
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-[var(--text-muted)] truncate">{subtitle}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openProfile(u)}
+            className="px-3 py-1 text-xs rounded-md border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
+          >
+            View
+          </button>
+          {!isSelf && (
+            <button
+              onClick={() => handleFollowAction(u)}
+              className={`px-3 py-1 text-xs rounded-md font-semibold transition-colors ${
+                followEntry
+                  ? "border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
+                  : "bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
+              }`}
+            >
+              {followLabel}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-[var(--text)] truncate">
-          {u.displayName || "Unknown"}
-        </p>
-        <p className="text-xs text-[var(--text-muted)] truncate">Public Profile</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => openProfile(u)}
-          className="px-3 py-1 text-xs rounded-md border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"
-        >
-          View
-        </button>
-        <button
-          onClick={() => handleFollowAction(u)}
-          className="px-3 py-1 text-xs rounded-md bg-[var(--accent)] text-white font-semibold hover:bg-[var(--accent-strong)] transition-colors"
-        >
-          Follow
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const showNoResults =
     navSearchMode === "games"

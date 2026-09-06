@@ -30,6 +30,7 @@ import BrowsePage from './components/BrowsePage';
 import SearchDropdown from './components/SearchDropdown';
 import BoardPage from './components/BoardPage';
 import ProfilePage from './components/ProfilePage';
+import ConnectionsPage from './components/ConnectionsPage';
 import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
 import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
 
@@ -58,7 +59,10 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   
   const { data, dataRef, isDataLoading, saveStatus, performSmartMigration, boardActions } = useBoard(user);
-  const { relationships, follow, unfollow, block, unblock, acceptRequest, declineRequest } = useRelationships(user);
+  const {
+    relationships, friends, isLoading: areRelationshipsLoading,
+    follow, unfollow, block, unblock, acceptRequest, declineRequest,
+  } = useRelationships(user);
   const {
     userSettings,
     setUserSettings,
@@ -75,7 +79,7 @@ export default function App() {
   // --- URL state (react-router) ---
   // Views live in the URL: / (board, ?view=list), /board/:columnId, /favorites,
   // /browse, /playlists, /playlists/:id, /u/:uid.
-  const { pathname } = useLocation();
+  const { pathname, search: locationSearch } = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const zoomedColumnId = matchPath('/board/:columnId', pathname)?.params.columnId || null;
@@ -92,6 +96,7 @@ export default function App() {
   const openPlaylists = () => navigate('/playlists');
   const openPlaylist = (id) => navigate(id ? `/playlists/${id}` : '/playlists');
   const closePlaylists = () => navigate('/');
+  const openConnections = () => navigate('/connections');
   
   // View State
   const [activePlatformFilter, setActivePlatformFilter] = useState('All');
@@ -128,7 +133,6 @@ export default function App() {
   const [userSearchError, setUserSearchError] = useState(null);
   const [navSearchMode, setNavSearchMode] = useState('games'); // 'players' | 'games'
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
-  const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
   const [isBrowsePlaylistsModalOpen, setIsBrowsePlaylistsModalOpen] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState(null); // { gameId, currentCol }
   const [duplicateTarget, setDuplicateTarget] = useState('');
@@ -341,7 +345,6 @@ export default function App() {
   const openProfile = (profile) => {
     const uid = typeof profile === 'string' ? profile : profile?.uid;
     if (!uid) return;
-    setIsFriendsModalOpen(false);
     setIsSearchBarOpen(false);
     navigate(`/u/${uid}`);
   };
@@ -769,7 +772,7 @@ export default function App() {
                     <button onClick={() => { setIsFavoritesView(!isFavoritesView); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isFavoritesView ? 'Exit favorites' : 'Favorites'}</button>
                     <button onClick={() => { setIsListView(!isListView); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">{isListView ? 'Grid view' : 'List view'}</button>
                     <button onClick={() => { setIsSettingsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Settings</button>
-                    <button onClick={() => { setIsFriendsModalOpen(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Friends</button>
+                    <button onClick={() => { openConnections(); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 text-left hover:bg-[var(--panel-muted)]">Connections</button>
                   </div>
                 </div>
               )}
@@ -898,10 +901,13 @@ export default function App() {
                   openProfile={openProfile}
                   handleBrowseListAction={handleBrowseListAction}
                   data={data}
+                  currentUid={user?.uid}
+                  relationships={relationships}
+                  friends={friends}
                 />
               </div>
             )}
-            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={() => setIsFriendsModalOpen(true)} onOpenMyProfile={() => navigate('/u/me')} onCopyProfileLink={copyOwnProfileLink} />}
+            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={openConnections} onOpenMyProfile={() => navigate('/u/me')} onCopyProfileLink={copyOwnProfileLink} />}
             {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
          </div>
         </div>
@@ -1033,6 +1039,27 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/connections"
+            element={
+              <ConnectionsPage
+                user={user}
+                isAuthLoading={isAuthLoading}
+                isLoading={areRelationshipsLoading}
+                relationships={relationships}
+                friends={friends}
+                onOpenProfile={openProfile}
+                onUnfollow={unfollow}
+                onUnblock={unblock}
+                onRequestAction={handleRequestAction}
+                onBlockAction={handleBlockAction}
+                loadProfileBoardModel={loadProfileBoardModel}
+                subscribeToUserGames={subscribeToUserGames}
+              />
+            }
+          />
+          {/* The spec named /friends; it is the default tab of the page. */}
+          <Route path="/friends" element={<Navigate to={`/connections${locationSearch}`} replace />} />
           {['/', '/board/:columnId', '/favorites', '/playlists', '/playlists/:id'].map(path => (
             <Route key={path} path={path} element={boardElement} />
           ))}
@@ -1305,83 +1332,6 @@ export default function App() {
               Move game
             </button>
           </div>
-        </div>
-      </Modal>
-
-      {/* Friends / Connections Modal */}
-      <Modal isOpen={isFriendsModalOpen} onClose={() => setIsFriendsModalOpen(false)} title="Connections">
-        <div className="space-y-4">
-          <section>
-            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Following</div>
-            <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-              {Object.values(relationships.following || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-[var(--text-muted)] truncate">{p.status === 'pending' ? 'Request sent' : 'Following'}</div>
-                  </div>
-                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">View</button>
-                  <button onClick={() => unfollow(p.uid)} className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Unfollow</button>
-                </div>
-              ))}
-              {Object.keys(relationships.following || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">Not following anyone yet.</div>}
-            </div>
-          </section>
-
-          {Object.keys(relationships.requests || {}).length > 0 && (
-            <section>
-              <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Follow Requests</div>
-              <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                {Object.values(relationships.requests || {}).map(p => (
-                  <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
-                    <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-[var(--text)] truncate">{p.displayName || 'Player'}</div>
-                      <div className="text-[11px] text-[var(--text-muted)] truncate">Wants to follow you</div>
-                    </div>
-                    <button onClick={() => handleRequestAction(p, true)} className="text-xs px-2 py-1 rounded bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-semibold">Accept</button>
-                    <button onClick={() => handleRequestAction(p, false)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">Decline</button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section>
-            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Followers</div>
-            <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-              {Object.values(relationships.followers || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-[var(--text-muted)] truncate">{p.status || 'Follower'}</div>
-                  </div>
-                  <button onClick={() => openProfile(p)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">View</button>
-                  <button onClick={() => handleBlockAction(p)} className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
-                </div>
-              ))}
-              {Object.keys(relationships.followers || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">No followers yet.</div>}
-            </div>
-          </section>
-
-          <section>
-            <div className="text-xs uppercase text-[var(--text-muted)] mb-2">Blocked</div>
-            <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
-              {Object.values(relationships.blocked || {}).map(p => (
-                <div key={p.uid} className="flex items-center gap-3 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg p-2">
-                  <div className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--text)] flex items-center justify-center uppercase text-sm font-bold">{p.displayName?.[0] || 'P'}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-[var(--text)] truncate">{p.displayName}</div>
-                    <div className="text-[11px] text-[var(--text-muted)] truncate">Blocked</div>
-                  </div>
-                  <button onClick={() => unblock(p.uid)} className="text-xs px-2 py-1 rounded bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] hover:border-[var(--accent)]">Unblock</button>
-                </div>
-              ))}
-              {Object.keys(relationships.blocked || {}).length === 0 && <div className="text-xs text-[var(--text-muted)]">No blocked users.</div>}
-            </div>
-          </section>
         </div>
       </Modal>
 

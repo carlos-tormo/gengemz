@@ -36,6 +36,35 @@ export const subscribeToRelationshipType = (
   );
 };
 
+/*
+ * Friends (S6) = mutual follow. Decision 1 keeps the relationship model
+ * asymmetric, so there is no `friends` collection: a friend is someone I follow
+ * with an accepted status who also sits in my followers. A still-`pending`
+ * request to an invite-only profile is not a friendship.
+ *
+ * Pure so it can be unit-tested; the hook memoises it over the four listeners.
+ */
+export const computeFriends = ({ following = {}, followers = {}, blocked = {} } = {}) => (
+  Object.values(following)
+    .filter((entry) => entry?.uid
+      && entry.status === 'following'
+      && followers[entry.uid]
+      // Blocking deletes both sides, but the four listeners are separate
+      // snapshots: this keeps a just-blocked user out of the in-between frame.
+      && !blocked[entry.uid])
+    .map((entry) => {
+      const follower = followers[entry.uid] || {};
+      return {
+        uid: entry.uid,
+        // The followers entry is written from `user.displayName`, which can be
+        // empty; the following entry comes from the public profile.
+        displayName: entry.displayName || follower.displayName || 'Player',
+        photoURL: entry.photoURL || follower.photoURL || '',
+      };
+    })
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+);
+
 export const followProfile = async (user, profile) => {
   if (!user || !profile?.uid || profile.uid === user.uid) {
     return { ok: false, error: 'invalid' };
