@@ -1,9 +1,10 @@
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
+  collection, deleteField, doc, getDoc, getDocs, limit as queryLimit, onSnapshot, orderBy,
+  query, serverTimestamp, startAfter, where, writeBatch,
 } from 'firebase/firestore';
 import { APP_ID, INITIAL_DATA } from '../config/constants';
 import { db } from '../config/firebase';
-import { createClientId, sameGameIdentity } from '../utils/gameUtils';
+import { createClientId, platformBucket, sameGameIdentity } from '../utils/gameUtils';
 
 /*
  * Board data layer (schema v2 — per-game documents).
@@ -32,6 +33,15 @@ import { createClientId, sameGameIdentity } from '../utils/gameUtils';
 export const GAMES_SCHEMA_VERSION = 2;
 const BATCH_CHUNK = 400;
 const MIN_GAP = 1e-6;
+
+/*
+ * Field sentinels. The pure builders stay plain data (so the tests can read
+ * what they produce), and the two sentinels below are translated at the edges:
+ * `commitBoardChange` turns them into the Firestore values, `applyChange`
+ * approximates them in the optimistic model.
+ */
+export const SERVER_NOW = '__ggz_server_now__';
+export const CLEAR_FIELD = '__ggz_clear_field__';
 
 const boardDoc = (uid) => doc(db, 'artifacts', APP_ID, 'users', uid, 'data', 'board');
 const gamesCollection = (uid) => collection(db, 'artifacts', APP_ID, 'users', uid, 'games');
@@ -63,6 +73,30 @@ const byPosition = (a, b) => (a.position ?? 0) - (b.position ?? 0) || String(a.i
 export const columnGames = (model, columnId) => Object.values(model.games || {})
   .filter((game) => game.columnId === columnId)
   .sort(byPosition);
+
+/** A column whose games count as finished (S4 progression, S5 activity). */
+export const isCompletionColumn = (model, columnId) => (
+  !!columnId && model?.columns?.[columnId]?.isCompletion === true
+);
+
+/** Games sitting in any completion column, most recently completed first. */
+export const completedGames = (model) => Object.values(model?.games || {})
+  .filter((game) => isCompletionColumn(model, game.columnId))
+  .sort((a, b) => (toMillis(b.completedAt) ?? 0) - (toMillis(a.completedAt) ?? 0));
+
+/**
+ * `completedAt` follows the column, not the game: entering a completion column
+ * stamps it, leaving one clears it. Re-completing a game therefore refreshes
+ * the date, and "recently completed" can never disagree with the column the
+ * game is actually in. Returns the fields to merge onto the moved game.
+ */
+const completionFields = (model, gameId, targetColumnId) => {
+  const from = model?.games?.[gameId]?.columnId;
+  if (from === targetColumnId) return null;
+  if (isCompletionColumn(model, targetColumnId)) return { completedAt: SERVER_NOW };
+  if (from != null && isCompletionColumn(model, from)) return { completedAt: CLEAR_FIELD };
+  return null;
+};
 
 /**
  * Derives the pre-v2 board shape the UI was written against:
@@ -125,6 +159,15 @@ const normalizeRating = (value) => {
 
 const isTimestampLike = (value) => value instanceof Date
   || (!!value && typeof value === 'object' && typeof value.toDate === 'function');
+
+/** Firestore Timestamp | Date | ms number -> ms, or null. */
+export const toMillis = (value) => {
+  if (value == null) return null;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  const millis = Number(value);
+  return Number.isFinite(millis) ? millis : null;
+};
 
 /**
  * Coerces a stored game of any age into a document the schema-2 rules accept:
@@ -228,6 +271,7 @@ export const positionBetween = (before, after) => {
  * below MIN_GAP the whole column is renumbered with integer positions.
  */
 const placeInColumn = (model, columnId, gameId, index, extraFields = {}) => {
+  const fields = { ...completionFields(model, gameId, columnId), ...extraFields };
   const others = columnGames(model, columnId).filter((game) => game.id !== gameId);
   const at = Math.max(0, Math.min(index, others.length));
   const before = others[at - 1]?.position;
@@ -235,12 +279,12 @@ const placeInColumn = (model, columnId, gameId, index, extraFields = {}) => {
   const gap = before != null && after != null ? after - before : Infinity;
 
   if (gap >= MIN_GAP) {
-    return [{ id: gameId, data: { ...extraFields, columnId, position: positionBetween(before, after) }, merge: true }];
+    return [{ id: gameId, data: { ...fields, columnId, position: positionBetween(before, after) }, merge: true }];
   }
 
   const ordered = [...others.slice(0, at), { id: gameId }, ...others.slice(at)];
   return ordered.map((game, position) => (game.id === gameId
-    ? { id: gameId, data: { ...extraFields, columnId, position }, merge: true }
+    ? { id: gameId, data: { ...fields, columnId, position }, merge: true }
     : { id: game.id, data: { position }, merge: true }));
 };
 
@@ -300,6 +344,8 @@ export const addGameToBoardData = (model, game, targetColumnId, gameId) => {
     id: gameId,
     columnId: target,
     position: placement.data.position,
+    // Added straight into a completion column: stamp it like any other move.
+    ...(placement.data.completedAt === SERVER_NOW ? { completedAt: SERVER_NOW } : {}),
   });
   return {
     gameWrites: mergeWrites(
@@ -337,28 +383,57 @@ export const toggleFavoriteOnBoardData = (model, gameId) => {
 
 export const patchGameOnBoardData = (model, gameId, fields) => {
   if (!model.games?.[gameId]) return NO_CHANGE;
-  return { gameWrites: [{ id: gameId, data: sanitizeGame(fields), merge: true }] };
+  // A patch that happens to move the game keeps completedAt in step with the
+  // column, exactly as an explicit move would.
+  const completion = fields?.columnId ? completionFields(model, gameId, fields.columnId) : null;
+  return { gameWrites: [{ id: gameId, data: { ...completion, ...sanitizeGame(fields) }, merge: true }] };
+};
+
+/**
+ * Any number of columns may be flagged `isCompletion`. Unticking the flag
+ * removes the key rather than storing `false`, so the board document keeps the
+ * shape the migration and INITIAL_DATA produce.
+ */
+const columnFromForm = (columnForm, existing = {}) => {
+  const { isCompletion: _drop, ...rest } = existing;
+  return {
+    ...rest,
+    id: columnForm.id,
+    title: columnForm.title,
+    icon: columnForm.icon,
+    ...(columnForm.isCompletion ? { isCompletion: true } : {}),
+  };
+};
+
+/**
+ * Games already sitting in a column that has just become a completion column
+ * are stamped now; games in one that stopped being a completion column lose
+ * their date, so `completedAt` never outlives the flag that produced it.
+ */
+const completionFlagWrites = (model, columnId, isCompletion) => {
+  const was = isCompletionColumn(model, columnId);
+  if (was === !!isCompletion) return [];
+  const data = { completedAt: isCompletion ? SERVER_NOW : CLEAR_FIELD };
+  return columnGames(model, columnId).map((game) => ({ id: game.id, data, merge: true }));
 };
 
 export const saveColumnToBoardData = (model, columnForm, isEditingColumn) => {
   if (isEditingColumn) {
-    if (!model.columns?.[columnForm.id]) return NO_CHANGE;
+    const existing = model.columns?.[columnForm.id];
+    if (!existing) return NO_CHANGE;
     return {
       boardPatch: {
-        columns: {
-          ...model.columns,
-          [columnForm.id]: { ...model.columns[columnForm.id], title: columnForm.title, icon: columnForm.icon },
-        },
+        columns: { ...model.columns, [columnForm.id]: columnFromForm(columnForm, existing) },
         columnOrder: model.columnOrder,
       },
-      gameWrites: [],
+      gameWrites: completionFlagWrites(model, columnForm.id, columnForm.isCompletion),
     };
   }
 
   const id = columnForm.id || createClientId('col');
   return {
     boardPatch: {
-      columns: { ...model.columns, [id]: { id, title: columnForm.title, icon: columnForm.icon } },
+      columns: { ...model.columns, [id]: columnFromForm({ ...columnForm, id }) },
       columnOrder: [...model.columnOrder, id],
     },
     gameWrites: [],
@@ -378,7 +453,13 @@ export const deleteColumnFromBoardData = (model, columnId, deleteMode, destinati
     const first = columnGames(model, destinationColumnId)[0]?.position;
     const start = first == null ? 0 : first - orphans.length;
     gameWrites = orphans.map((game, index) => ({
-      id: game.id, data: { columnId: destinationColumnId, position: start + index }, merge: true,
+      id: game.id,
+      data: {
+        ...completionFields(model, game.id, destinationColumnId),
+        columnId: destinationColumnId,
+        position: start + index,
+      },
+      merge: true,
     }));
   } else {
     gameWrites = orphans.map((game) => ({ id: game.id, delete: true }));
@@ -391,14 +472,27 @@ export const deleteColumnFromBoardData = (model, columnId, deleteMode, destinati
 
 export const isNoopChange = (change) => !change?.boardPatch && !(change?.gameWrites?.length);
 
+/**
+ * Folds one game write into the optimistic model. `SERVER_NOW` becomes the
+ * client's clock (the listener replaces it with the server value moments
+ * later) and `CLEAR_FIELD` drops the key.
+ */
+const applyGameWrite = (existing, data, merge) => {
+  const next = merge ? { ...existing } : {};
+  Object.entries(data).forEach(([field, value]) => {
+    if (value === CLEAR_FIELD) delete next[field];
+    else next[field] = value === SERVER_NOW ? new Date() : value;
+  });
+  return next;
+};
+
 /** Folds a change into the in-memory model (optimistic state). */
 export const applyChange = (model, change) => {
   if (isNoopChange(change)) return model;
   const games = { ...model.games };
   (change.gameWrites || []).forEach((write) => {
     if (write.delete) delete games[write.id];
-    else if (write.merge) games[write.id] = { ...games[write.id], ...write.data, id: write.id };
-    else games[write.id] = { ...write.data, id: write.id };
+    else games[write.id] = { ...applyGameWrite(games[write.id], write.data, write.merge), id: write.id };
   });
   return { ...model, ...(change.boardPatch || {}), games };
 };
@@ -409,6 +503,12 @@ export const applyChange = (model, change) => {
  * account, which has no board document yet), in the first batch unless
  * `boardLast` moves it to the end.
  */
+const resolveSentinels = (data) => Object.fromEntries(Object.entries(data).map(([field, value]) => {
+  if (value === SERVER_NOW) return [field, serverTimestamp()];
+  if (value === CLEAR_FIELD) return [field, deleteField()];
+  return [field, value];
+}));
+
 export const commitBoardChange = async (uid, model, change, { includeBoard = false, boardLast = false } = {}) => {
   if (!uid || isNoopChange(change)) return;
   const writes = change.gameWrites || [];
@@ -417,9 +517,15 @@ export const commitBoardChange = async (uid, model, change, { includeBoard = fal
     const batch = writeBatch(db);
     writes.slice(i * BATCH_CHUNK, (i + 1) * BATCH_CHUNK).forEach((write) => {
       const ref = gameDoc(uid, write.id);
-      if (write.delete) batch.delete(ref);
-      else if (write.merge) batch.set(ref, { ...write.data, updatedAt: serverTimestamp() }, { merge: true });
-      else batch.set(ref, { ...write.data, addedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      if (write.delete) { batch.delete(ref); return; }
+      if (write.merge) {
+        batch.set(ref, { ...resolveSentinels(write.data), updatedAt: serverTimestamp() }, { merge: true });
+        return;
+      }
+      // A full document write has nothing to delete from, and Firestore
+      // rejects deleteField() outside a merge, so CLEAR_FIELD just drops out.
+      const created = Object.fromEntries(Object.entries(write.data).filter(([, value]) => value !== CLEAR_FIELD));
+      batch.set(ref, { ...resolveSentinels(created), addedAt: serverTimestamp(), updatedAt: serverTimestamp() });
     });
     batches.push(batch);
   }
@@ -442,25 +548,133 @@ export const subscribeToBoard = (user, onBoard, onError = console.error) => {
   }, onError);
 };
 
-export const subscribeToGames = (user, onGames, onError = console.error) => {
-  if (!user) return () => {};
-  return onSnapshot(gamesCollection(user.uid), (snapshot) => {
-    const games = {};
-    snapshot.forEach((docSnap) => { games[docSnap.id] = { ...docSnap.data(), id: docSnap.id }; });
-    onGames(games);
-  }, onError);
+const gamesFromSnapshot = (snapshot) => {
+  const games = [];
+  snapshot.forEach((docSnap) => { games.push({ ...docSnap.data(), id: docSnap.id }); });
+  return games;
+};
+
+export const gamesById = (games) => Object.fromEntries(games.map((game) => [game.id, game]));
+
+/**
+ * Query over one user's games collection.
+ *   columnId  restrict to one column (needs the games(columnId, position) index)
+ *   limit     first N in `position` order
+ *   cursor    a `position` value to continue after (paging within a column)
+ * With none of them it is the plain collection, unordered, which is what the
+ * board and the profile page use (<=500 documents, sorted client-side).
+ */
+const userGamesQuery = (uid, { columnId = null, limit = null, cursor = null } = {}) => {
+  const constraints = [];
+  if (columnId) constraints.push(where('columnId', '==', columnId));
+  if (columnId || limit || cursor != null) constraints.push(orderBy('position'));
+  if (cursor != null) constraints.push(startAfter(cursor));
+  if (limit) constraints.push(queryLimit(limit));
+  return constraints.length ? query(gamesCollection(uid), ...constraints) : gamesCollection(uid);
+};
+
+/**
+ * Live view of any user's games (their own board, or a profile the rules let
+ * you read). `onGames` receives an array in query order; use `gamesById` for
+ * the map shape the board model wants.
+ */
+export const subscribeToUserGames = (uid, options, onGames, onError = console.error) => {
+  if (!uid) return () => {};
+  return onSnapshot(userGamesQuery(uid, options), (snapshot) => onGames(gamesFromSnapshot(snapshot)), onError);
+};
+
+/** One-off equivalent of `subscribeToUserGames`. */
+export const getUserGames = async (uid, options) => gamesFromSnapshot(await getDocs(userGamesQuery(uid, options)));
+
+export const subscribeToBoardGames = (user, onGames, onError = console.error) => (
+  user ? subscribeToUserGames(user.uid, {}, (games) => onGames(gamesById(games)), onError) : () => {}
+);
+
+// Kept for the board hook, which wants the map shape.
+export const subscribeToGames = subscribeToBoardGames;
+
+/**
+ * One-off read of someone's board as a *model*. Schema-1 boards carry their
+ * games in the document, so `withGames: false` only saves reads on schema 2 —
+ * the profile page uses it and then attaches its own games listener.
+ */
+export const loadBoardModel = async (uid, { withGames = true } = {}) => {
+  const boardSnap = await getDoc(boardDoc(uid));
+  if (!boardSnap.exists()) return null;
+  const board = boardSnap.data();
+  if (!isV2Board(board)) return modelFromLegacyBoard(board);
+  if (!withGames) return { ...board, games: {} };
+  return { ...board, games: gamesById(await getUserGames(uid)) };
 };
 
 /** One-off read of someone's board as the pre-v2 view (profile preview). */
 export const loadBoardView = async (uid) => {
-  const boardSnap = await getDoc(boardDoc(uid));
-  if (!boardSnap.exists()) return null;
-  const board = boardSnap.data();
-  if (!isV2Board(board)) return toBoardView(modelFromLegacyBoard(board));
-  const gamesSnap = await getDocs(gamesCollection(uid));
-  const games = {};
-  gamesSnap.forEach((docSnap) => { games[docSnap.id] = { ...docSnap.data(), id: docSnap.id }; });
-  return toBoardView({ ...board, games });
+  const model = await loadBoardModel(uid);
+  return model ? toBoardView(model) : null;
+};
+
+/* ---------- progression stats (S4) ---------- */
+
+const ratingOf = (game) => {
+  const rating = Number(game?.rating);
+  return Number.isFinite(rating) && rating > 0 ? rating : 0;
+};
+
+/**
+ * Everything the profile's Stats tab shows, derived from a model — no extra
+ * reads. At <=500 games this is cheaper than any aggregation query, and it is
+ * the same arithmetic whichever schema the owner is on.
+ */
+export const computeUserStats = (model, { topRatedLimit = 5, recentLimit = 5 } = {}) => {
+  const games = Object.values(model?.games || {});
+  const columnOrder = (model?.columnOrder || []).filter((id) => model?.columns?.[id]);
+  const perColumn = columnOrder.map((id) => ({
+    id,
+    title: model.columns[id].title,
+    icon: model.columns[id].icon,
+    isCompletion: model.columns[id].isCompletion === true,
+    count: games.filter((game) => game.columnId === id).length,
+  }));
+
+  const rated = games.filter((game) => ratingOf(game) > 0);
+  const ratingHistogram = Array.from({ length: 10 }, (_unused, index) => ({
+    rating: index + 1,
+    count: rated.filter((game) => ratingOf(game) === index + 1).length,
+  }));
+
+  const platformCounts = new Map();
+  games.forEach((game) => {
+    const bucket = platformBucket(game.platform) || 'Unknown';
+    platformCounts.set(bucket, (platformCounts.get(bucket) || 0) + 1);
+  });
+  const platforms = [...platformCounts.entries()]
+    .map(([name, count]) => ({ name, count, share: games.length ? count / games.length : 0 }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return {
+    total: games.length,
+    perColumn,
+    favorites: games.filter((game) => game.isFavorite === true).length,
+    completed: games.filter((game) => isCompletionColumn(model, game.columnId)).length,
+    ratedCount: rated.length,
+    averageRating: rated.length
+      ? rated.reduce((sum, game) => sum + ratingOf(game), 0) / rated.length
+      : null,
+    ratingHistogram,
+    platforms,
+    topRated: [...rated]
+      .sort((a, b) => ratingOf(b) - ratingOf(a) || String(a.title).localeCompare(String(b.title)))
+      .slice(0, topRatedLimit),
+    recentlyCompleted: completedGames(model)
+      .filter((game) => toMillis(game.completedAt) != null)
+      .slice(0, recentLimit),
+  };
+};
+
+/** One-off `computeUserStats` for a user whose board you can read. */
+export const getUserStats = async (uid, options) => {
+  const model = await loadBoardModel(uid);
+  return model ? computeUserStats(model, options) : null;
 };
 
 /* ---------- schema 1 → schema 2 migration (S3) ---------- */
@@ -548,6 +762,8 @@ export const mergeGuestBoardIntoUserBoard = async (guestModel, targetUid) => {
       const columnId = merged.columns[game.columnId] ? game.columnId : merged.columnOrder[0];
       const [placement, ...renumbered] = placeInColumn(merged, columnId, game.id, Infinity);
       const data = normalizeGameForV2(game, { id: game.id, columnId, position: placement.data.position });
+      // The guest's date only means something if it lands in a completion column.
+      if (!isCompletionColumn(merged, columnId)) delete data.completedAt;
       writes.push({ id: game.id, data }, ...renumbered);
       merged = applyChange(merged, { gameWrites: [{ id: game.id, data }, ...renumbered] });
     });

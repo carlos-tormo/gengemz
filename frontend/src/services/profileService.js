@@ -11,7 +11,13 @@ import {
 } from 'firebase/firestore';
 import { APP_ID } from '../config/constants';
 import { db } from '../config/firebase';
-import { loadBoardView } from './boardService';
+import {
+  computeUserStats,
+  getUserStats,
+  loadBoardModel,
+  loadBoardView,
+  subscribeToUserGames,
+} from './boardService';
 
 const userDataDoc = (uid, docId) => doc(db, 'artifacts', APP_ID, 'users', uid, 'data', docId);
 const publicProfileDoc = (uid) => doc(db, 'artifacts', APP_ID, 'public_profiles', uid);
@@ -155,3 +161,13 @@ export const getPublicProfile = async (uid) => {
 // Returns the board in the pre-v2 view shape ({ columns[id].itemIds, games })
 // whichever schema the owner is on.
 export const loadProfileBoard = (uid) => loadBoardView(uid);
+
+/*
+ * Progression view (S4). The profile page loads the board *model* without its
+ * games and then subscribes to them, so a friend's board stays live and each
+ * game is read once. A schema-1 owner has no games collection — their games
+ * come back inside the model and the subscription is skipped.
+ */
+export const loadProfileBoardModel = (uid) => loadBoardModel(uid, { withGames: false });
+
+export { computeUserStats, getUserStats, subscribeToUserGames };

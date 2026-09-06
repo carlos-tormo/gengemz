@@ -1,14 +1,23 @@
+/**
+ * Buckets a game's raw `platform` string into the family the board filters by.
+ * Anything unrecognised is its own bucket (the raw string), which is what the
+ * platform filter has always done. Returns null for a game with no platform.
+ */
+export const platformBucket = (platform) => {
+  if (!platform) return null;
+  if (platform.includes('PlayStation')) return 'PlayStation';
+  if (platform.includes('Xbox')) return 'Xbox';
+  if (platform.includes('PC')) return 'PC';
+  if (platform.includes('Nintendo') || platform.includes('Switch')) return 'Nintendo';
+  return platform;
+};
+
 export const getUniquePlatforms = (data) => {
     const platforms = new Set(['All']);
     if (data.games) {
       Object.values(data.games).forEach(game => {
-        if (!game.platform) return;
-        const p = game.platform;
-        if (p.includes('PlayStation')) platforms.add('PlayStation');
-        else if (p.includes('Xbox')) platforms.add('Xbox');
-        else if (p.includes('PC')) platforms.add('PC');
-        else if (p.includes('Nintendo') || p.includes('Switch')) platforms.add('Nintendo');
-        else platforms.add(p);
+        const bucket = platformBucket(game.platform);
+        if (bucket) platforms.add(bucket);
       });
     }
     return Array.from(platforms).sort();

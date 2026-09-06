@@ -3,8 +3,10 @@ import {
   createDebugProfiles,
   getPublicProfile,
   loadProfileBoard,
+  loadProfileBoardModel,
   saveUserSettings,
   searchPublicProfiles,
+  subscribeToUserGames,
   subscribeToUserSettings,
 } from '../services/profileService';
 
@@ -46,6 +48,8 @@ const useUserProfile = (user) => {
     searchPublicProfiles,
     getPublicProfile,
     loadProfileBoard,
+    loadProfileBoardModel,
+    subscribeToUserGames,
   };
 };
 

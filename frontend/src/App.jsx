@@ -68,7 +68,8 @@ export default function App() {
     createDebugProfiles: seedDebugProfiles,
     searchPublicProfiles,
     getPublicProfile,
-    loadProfileBoard,
+    loadProfileBoardModel,
+    subscribeToUserGames,
   } = useUserProfile(user);
 
   // --- URL state (react-router) ---
@@ -97,7 +98,7 @@ export default function App() {
   
   // Modals
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
-  const [columnForm, setColumnForm] = useState({ id: '', title: '', icon: 'gamepad' });
+  const [columnForm, setColumnForm] = useState({ id: '', title: '', icon: 'gamepad', isCompletion: false });
   const [isEditingColumn, setIsEditingColumn] = useState(false);
   const [deleteMode, setDeleteMode] = useState('move'); // 'move' | 'delete'
   const [deleteTarget, setDeleteTarget] = useState('');
@@ -645,11 +646,21 @@ export default function App() {
     boardActions.toggleFavorite(id);
   };
 
-  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad' }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
-  const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad' }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
+  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad', isCompletion: false }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
+  const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad', isCompletion: c.isCompletion === true }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
   
   const handleSaveColumn = (e) => {
-    e.preventDefault(); if (!columnForm.title.trim()) return; 
+    e.preventDefault(); if (!columnForm.title.trim()) return;
+    // Unticking "games here count as finished" deletes the dates of every game
+    // in the list, and the same Save button also does rename/icon — so ask.
+    const column = data.columns[columnForm.id];
+    if (isEditingColumn && column?.isCompletion === true && !columnForm.isCompletion) {
+      const dated = (column.itemIds || []).filter(id => data.games[id]?.completedAt).length;
+      const ok = dated === 0 || window.confirm(
+        `${dated} game${dated === 1 ? '' : 's'} in "${column.title}" will lose ${dated === 1 ? 'its' : 'their'} completion date. This cannot be undone.`
+      );
+      if (!ok) return;
+    }
     boardActions.saveColumn(columnForm, isEditingColumn);
     setIsColumnModalOpen(false); 
   };
@@ -1009,7 +1020,8 @@ export default function App() {
                 user={user}
                 relationships={relationships}
                 getPublicProfile={getPublicProfile}
-                loadProfileBoard={loadProfileBoard}
+                loadProfileBoardModel={loadProfileBoardModel}
+                subscribeToUserGames={subscribeToUserGames}
                 onFollowAction={handleFollowAction}
                 onBlockAction={handleBlockAction}
                 onUnblock={unblock}
@@ -1664,6 +1676,25 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          <label className="flex items-start gap-3 p-3 border border-[var(--border)] rounded-lg bg-[var(--panel-muted)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={columnForm.isCompletion === true}
+              onChange={(e) => setColumnForm({ ...columnForm, isCompletion: e.target.checked })}
+              className="mt-0.5 accent-purple-600"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[var(--text)]">Games here count as finished</span>
+              <span className="block text-xs text-[var(--text-muted)] mt-0.5">
+                Moving a game into this list stamps the date you completed it, and it shows up in your profile stats.
+                {' '}
+                {columnForm.isCompletion
+                  ? 'Unticking this clears those dates for the games in this list.'
+                  : 'Ticking this dates the games already in this list as completed now.'}
+              </span>
+            </span>
+          </label>
 
           {isEditingColumn && (
             <div className="space-y-3 p-3 border border-[var(--border)] rounded-lg bg-[var(--panel-muted)]">
