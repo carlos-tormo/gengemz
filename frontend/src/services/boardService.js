@@ -91,6 +91,22 @@ export const isPlayingColumn = (model, columnId) => (
 export const playingColumnId = (model) => (model?.columnOrder || [])
   .find((id) => model?.columns?.[id]?.isPlaying === true) || null;
 
+/**
+ * What a "currently playing" row needs, decided from the board model alone:
+ * which list the owner flagged `isPlaying` (decision 9 — never the literal id
+ * 'playing') and, for a schema-1 board whose games ride inside the document,
+ * the first game in it. `subscribe` means the caller should attach a
+ * `subscribeToUserGames(uid, { columnId, limit: 1 })` listener instead.
+ */
+export const currentlyPlaying = (model) => {
+  if (!model) return { status: 'no-board' };
+  const columnId = playingColumnId(model);
+  if (!columnId) return { status: 'no-playing-column' };
+  const columnTitle = model.columns?.[columnId]?.title || 'Currently playing';
+  if (model.schemaVersion === GAMES_SCHEMA_VERSION) return { status: 'subscribe', columnId, columnTitle };
+  return { status: 'ready', columnId, columnTitle, game: columnGames(model, columnId)[0] || null };
+};
+
 /** Games sitting in any completion column, most recently completed first. */
 export const completedGames = (model) => Object.values(model?.games || {})
   .filter((game) => isCompletionColumn(model, game.columnId))

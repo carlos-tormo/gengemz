@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   acceptFollowRequest,
   blockProfile,
+  computeFriends,
   declineFollowRequest,
   followProfile,
   subscribeToRelationshipType,
   unblockProfile,
   unfollowProfile,
 } from '../services/relationshipService';
+
+const TYPES = ['following', 'followers', 'blocked', 'requests'];
 
 const EMPTY_RELATIONSHIPS = {
   following: {},
@@ -16,35 +19,59 @@ const EMPTY_RELATIONSHIPS = {
   requests: {},
 };
 
+const emptyState = (uid) => ({ uid, ...EMPTY_RELATIONSHIPS, delivered: {} });
+
+/*
+ * The four listeners are held as one state keyed by uid, for two reasons:
+ * signing out or switching account must not leave the previous account's lists
+ * on screen (and, since S6, must not fire board reads for their friends), and a
+ * page — as opposed to the old modal — has to tell "no friends" apart from
+ * "the snapshots have not arrived yet". `isLoading` is false only once all four
+ * listeners have delivered for the current user.
+ */
 const useRelationships = (user) => {
-  const [following, setFollowing] = useState({});
-  const [followers, setFollowers] = useState({});
-  const [blocked, setBlocked] = useState({});
-  const [requests, setRequests] = useState({});
+  const [state, setState] = useState(emptyState(null));
 
   useEffect(() => {
     if (!user) return undefined;
+    const { uid } = user;
 
-    const unsubscribeFollowing = subscribeToRelationshipType(user, 'following', setFollowing);
-    const unsubscribeFollowers = subscribeToRelationshipType(user, 'followers', setFollowers);
-    const unsubscribeBlocked = subscribeToRelationshipType(user, 'blocked', setBlocked);
-    const unsubscribeRequests = subscribeToRelationshipType(user, 'requests', setRequests);
-
-    return () => {
-      unsubscribeFollowing();
-      unsubscribeFollowers();
-      unsubscribeBlocked();
-      unsubscribeRequests();
+    const update = (type, patch) => setState((prev) => {
+      const base = prev.uid === uid ? prev : emptyState(uid);
+      return { ...base, ...patch, delivered: { ...base.delivered, [type]: true } };
+    });
+    const receive = (type) => (value) => update(type, { [type]: value });
+    // A listener that fails still counts as delivered: an empty list is wrong,
+    // but a page stuck on its spinner is worse.
+    const fail = (type) => (error) => {
+      console.error(`Relationship listener failed (${type})`, error);
+      update(type, {});
     };
+
+    const unsubscribes = TYPES.map((type) => (
+      subscribeToRelationshipType(user, type, receive(type), fail(type))
+    ));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, [user]);
 
+  const isCurrent = !!user && state.uid === user.uid;
+
   const relationships = useMemo(() => {
-    if (!user) return EMPTY_RELATIONSHIPS;
+    if (!isCurrent) return EMPTY_RELATIONSHIPS;
+    const { following, followers, blocked, requests } = state;
     return { following, followers, blocked, requests };
-  }, [blocked, followers, following, requests, user]);
+  }, [isCurrent, state]);
+
+  // Friends are derived, not stored (decision 1): the mutual-follow
+  // intersection of the two listeners already open.
+  const friends = useMemo(() => computeFriends(relationships), [relationships]);
 
   return {
     relationships,
+    friends,
+    // Nothing to load without a user, so this stays false rather than
+    // promising a resolution that never comes.
+    isLoading: !!user && (!isCurrent || TYPES.some((type) => !state.delivered[type])),
     follow: (profile) => followProfile(user, profile),
     unfollow: (targetUid) => unfollowProfile(user, targetUid),
     block: (profile) => blockProfile(user, profile),
