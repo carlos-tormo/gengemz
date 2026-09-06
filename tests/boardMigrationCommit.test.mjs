@@ -137,5 +137,54 @@ await t('a legacy target is migrated first, then merged as v2', async () => {
   assert.ok(state[GAME('b')], 'the target board keeps its own games');
 });
 
+console.log('S5 markers');
+
+await t('every migrated game carries the migratedAt bulk-import marker', async () => {
+  seedLegacy();
+  await migrateLegacyBoard('u1');
+  const state = dump();
+  ['a', 'b', 'c', 'zombie'].forEach((id) => {
+    assert.ok(state[GAME(id)].migratedAt instanceof Date, `${id} has no migratedAt`);
+  });
+});
+
+await t('a resumed migration re-stamps the documents it had already written', async () => {
+  seedLegacy();
+  seed(GAME('a'), { id: 'a', title: 'Hollow Knight', columnId: 'backlog', position: 0, rating: 0, isFavorite: false, addedAt: new Date('2025-01-01') });
+  await migrateLegacyBoard('u1');
+  const state = dump();
+  assert.deepEqual(state[GAME('a')].addedAt, new Date('2025-01-01'), 'addedAt must survive');
+  assert.ok(state[GAME('a')].migratedAt instanceof Date);
+});
+
+await t('the guest merge is not marked, so its games still count as added', async () => {
+  seedLegacy();
+  await migrateLegacyBoard('u1');
+  await mergeGuestBoardIntoUserBoard({
+    columns: { backlog: { id: 'backlog', title: 'To Play' } },
+    columnOrder: ['backlog'],
+    games: { g9: { id: 'g9', title: 'Outer Wilds', columnId: 'backlog', position: 0, rating: 0, isFavorite: false } },
+  }, 'u1');
+  assert.equal(dump()[GAME('g9')].migratedAt, undefined);
+});
+
+await t('the migration flags the default playing list (S5 game_started, S6)', async () => {
+  reset();
+  seed(BOARD, {
+    columns: {
+      backlog: { id: 'backlog', title: 'To Play', icon: 'clock', itemIds: [] },
+      playing: { id: 'playing', title: 'Currently Playing', icon: 'gamepad', itemIds: ['a'] },
+      completed: { id: 'completed', title: 'Victory Road', icon: 'trophy', itemIds: [] },
+    },
+    columnOrder: ['backlog', 'playing', 'completed'],
+    games: { a: { id: 'a', title: 'Hollow Knight', rating: 0 } },
+  });
+  await migrateLegacyBoard('u1');
+  const state = dump();
+  assert.equal(state[BOARD].columns.playing.isPlaying, true);
+  assert.equal(state[BOARD].columns.completed.isCompletion, true);
+  assert.equal(state[BOARD].columns.backlog.isPlaying, undefined);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

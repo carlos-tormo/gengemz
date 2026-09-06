@@ -2,6 +2,7 @@ const {onRequest} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const fetch = require("node-fetch");
+const activity = require("./activity");
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -248,3 +249,13 @@ exports.searchGames = onRequest(
       }
     },
 );
+
+/* =======================
+   ACTIVITY EVENTS (S5)
+   ======================= */
+
+// Defined in activity.js; re-exported here because firebase-functions
+// discovers deployable functions from this module's exports.
+exports.onGameWritten = activity.onGameWritten;
+exports.onPublicPlaylistCreated = activity.onPublicPlaylistCreated;
+exports.pruneActivityEvents = activity.pruneActivityEvents;

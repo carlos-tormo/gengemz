@@ -79,6 +79,18 @@ export const isCompletionColumn = (model, columnId) => (
   !!columnId && model?.columns?.[columnId]?.isCompletion === true
 );
 
+/**
+ * The column whose games count as "currently playing". At most one list may
+ * carry the flag (S5 emits `game_started` for it, S6 reads the first game in
+ * it); `null` when the user unticked it everywhere.
+ */
+export const isPlayingColumn = (model, columnId) => (
+  !!columnId && model?.columns?.[columnId]?.isPlaying === true
+);
+
+export const playingColumnId = (model) => (model?.columnOrder || [])
+  .find((id) => model?.columns?.[id]?.isPlaying === true) || null;
+
 /** Games sitting in any completion column, most recently completed first. */
 export const completedGames = (model) => Object.values(model?.games || {})
   .filter((game) => isCompletionColumn(model, game.columnId))
@@ -127,6 +139,7 @@ export const toBoardView = (model) => {
 /* ---------- legacy -> v2 normalisation ---------- */
 
 const COMPLETION_COLUMN_ID = 'completed';
+const PLAYING_COLUMN_ID = 'playing';
 
 // Optional string fields of a schema-2 game document, with the length the
 // rules allow (see `validGameShape` in firestore.rules). `addedAt`/`updatedAt`
@@ -196,11 +209,24 @@ export const normalizeGameForV2 = (game, { id, columnId, position }) => {
   return normalized;
 };
 
-/** The default "completed" column is what S4/S5 read as "finished". */
-const withCompletionFlag = (columns) => {
-  const column = columns?.[COMPLETION_COLUMN_ID];
-  if (!column || column.isCompletion === true) return columns;
-  return { ...columns, [COMPLETION_COLUMN_ID]: { ...column, isCompletion: true } };
+/**
+ * The default lists carry the flags the later tasks read: "completed" is what
+ * counts as finished (S4 dates, S5 `game_completed`), "playing" is what counts
+ * as currently playing (S5 `game_started`, S6). New boards get both from
+ * INITIAL_DATA; migrating ones get them here.
+ */
+const withDefaultFlags = (columns) => {
+  const next = { ...(columns || {}) };
+  const completion = next[COMPLETION_COLUMN_ID];
+  if (completion && completion.isCompletion !== true) {
+    next[COMPLETION_COLUMN_ID] = { ...completion, isCompletion: true };
+  }
+  const playing = next[PLAYING_COLUMN_ID];
+  const flagged = Object.values(next).some((column) => column?.isPlaying === true);
+  if (playing && !flagged) {
+    next[PLAYING_COLUMN_ID] = { ...playing, isPlaying: true };
+  }
+  return next;
 };
 
 /**
@@ -234,7 +260,7 @@ export const modelFromLegacyBoard = (board) => {
     });
   }
 
-  return { schemaVersion: 1, columns: withCompletionFlag(columns), columnOrder, games };
+  return { schemaVersion: 1, columns: withDefaultFlags(columns), columnOrder, games };
 };
 
 /** Model → schema-1 document (used only while a user is still on schema 1). */
@@ -395,14 +421,29 @@ export const patchGameOnBoardData = (model, gameId, fields) => {
  * shape the migration and INITIAL_DATA produce.
  */
 const columnFromForm = (columnForm, existing = {}) => {
-  const { isCompletion: _drop, ...rest } = existing;
+  const { isCompletion: _dropCompletion, isPlaying: _dropPlaying, ...rest } = existing;
   return {
     ...rest,
     id: columnForm.id,
     title: columnForm.title,
     icon: columnForm.icon,
     ...(columnForm.isCompletion ? { isCompletion: true } : {}),
+    ...(columnForm.isPlaying ? { isPlaying: true } : {}),
   };
+};
+
+/**
+ * Any number of lists may be completion lists, but only one can be the
+ * "currently playing" list — S6 shows a single game and S5 a single
+ * `game_started`. Saving one with the flag takes it off the others.
+ */
+const withSinglePlaying = (columns, keepId) => {
+  if (columns[keepId]?.isPlaying !== true) return columns;
+  return Object.fromEntries(Object.entries(columns).map(([id, column]) => {
+    if (id === keepId || column?.isPlaying !== true) return [id, column];
+    const { isPlaying: _drop, ...rest } = column;
+    return [id, rest];
+  }));
 };
 
 /**
@@ -423,7 +464,10 @@ export const saveColumnToBoardData = (model, columnForm, isEditingColumn) => {
     if (!existing) return NO_CHANGE;
     return {
       boardPatch: {
-        columns: { ...model.columns, [columnForm.id]: columnFromForm(columnForm, existing) },
+        columns: withSinglePlaying(
+          { ...model.columns, [columnForm.id]: columnFromForm(columnForm, existing) },
+          columnForm.id,
+        ),
         columnOrder: model.columnOrder,
       },
       gameWrites: completionFlagWrites(model, columnForm.id, columnForm.isCompletion),
@@ -433,7 +477,10 @@ export const saveColumnToBoardData = (model, columnForm, isEditingColumn) => {
   const id = columnForm.id || createClientId('col');
   return {
     boardPatch: {
-      columns: { ...model.columns, [id]: columnFromForm({ ...columnForm, id }) },
+      columns: withSinglePlaying(
+        { ...model.columns, [id]: columnFromForm({ ...columnForm, id }) },
+        id,
+      ),
       columnOrder: [...model.columnOrder, id],
     },
     gameWrites: [],
@@ -697,11 +744,15 @@ const runMigration = async (uid) => {
   const existingSnap = await getDocs(gamesCollection(uid));
   existingSnap.forEach((docSnap) => existing.add(docSnap.id));
 
+  // `migratedAt` marks these as a bulk import rather than something the user
+  // just did, so S5's activity trigger doesn't turn one migration into a
+  // hundred "added a game" events.
   const change = {
     boardPatch: { columns: model.columns, columnOrder: model.columnOrder },
-    gameWrites: Object.values(model.games).map((game) => (
-      existing.has(game.id) ? { id: game.id, data: game, merge: true } : { id: game.id, data: game }
-    )),
+    gameWrites: Object.values(model.games).map((game) => {
+      const data = { ...game, migratedAt: SERVER_NOW };
+      return existing.has(game.id) ? { id: game.id, data, merge: true } : { id: game.id, data };
+    }),
   };
 
   await commitBoardChange(uid, model, change, { boardLast: true });

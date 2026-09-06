@@ -9,7 +9,8 @@ import {
   initializeTestEnvironment, assertSucceeds, assertFails,
 } from '@firebase/rules-unit-testing';
 import {
-  collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, writeBatch,
+  collection, collectionGroup, doc, getDoc, getDocs, limit, orderBy, query,
+  setDoc, deleteDoc, serverTimestamp, where, writeBatch,
 } from 'firebase/firestore';
 
 const APP = 'gengemz-prod';
@@ -23,6 +24,8 @@ const boardRef = (db, uid) => P(db, 'users', uid, 'data', 'board');
 const rel = (db, owner, type, other) => P(db, 'relationships', owner, type, other);
 const gameRef = (db, uid, gameId) => P(db, 'users', uid, 'games', gameId);
 const gamesCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'games');
+const activityRef = (db, uid, eventId) => P(db, 'users', uid, 'activity', eventId);
+const activityCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'activity');
 
 // Seed: alice public, bob invite_only, carol private. Each has a board.
 await env.withSecurityRulesDisabled(async (ctx) => {
@@ -211,6 +214,62 @@ await t('migration cannot leave the games map on the v2 board', () => assertFail
 await t('a legacy float rating cannot be carried over as-is', () => assertFails(
   setDoc(gameRef(yara, 'yara', 'old3'), game('old3', { rating: 4.42 })),
 ));
+
+await t('create accepts the migratedAt marker (S5 bulk-import signal)', () => assertSucceeds(
+  setDoc(gameRef(yara, 'yara', 'old4'), game('old4', { migratedAt: serverTimestamp() })),
+));
+await t('create rejects a non-timestamp migratedAt', () => assertFails(
+  setDoc(gameRef(yara, 'yara', 'old5'), game('old5', { migratedAt: 'yes' })),
+));
+
+console.log('Activity events (S5)');
+// Written by the triggers with the admin SDK, so they are seeded with the
+// rules disabled here; clients may only ever read them.
+const event = (uid, extra = {}) => ({
+  appId: APP, uid, type: 'game_added', createdAt: new Date(),
+  game: { id: 'g1', title: 'Hollow Knight', cover: '' },
+  meta: { toColumnId: 'backlog', columnTitle: 'To Play' }, ...extra,
+});
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  for (const uid of ['alice', 'bob', 'carol']) {
+    await setDoc(activityRef(db, uid, `${uid}-e1`), event(uid));
+  }
+});
+
+await t('owner reads own activity', () => assertSucceeds(getDoc(activityRef(alice, 'alice', 'alice-e1'))));
+await t('owner of a private profile reads own activity', () => assertSucceeds(getDoc(activityRef(as('carol'), 'carol', 'carol-e1'))));
+await t('unauthenticated cannot read activity', () => assertFails(getDoc(activityRef(anon, 'alice', 'alice-e1'))));
+await t('stranger reads a public user activity', () => assertSucceeds(getDoc(activityRef(dave, 'alice', 'alice-e1'))));
+await t('stranger lists a public user activity', () => assertSucceeds(getDocs(activityCol(dave, 'alice'))));
+await t('blocked user cannot read a public user activity', () => assertFails(getDoc(activityRef(mallory, 'alice', 'alice-e1'))));
+await t('stranger cannot read an invite_only user activity', () => assertFails(getDoc(activityRef(as('frank'), 'bob', 'bob-e1'))));
+await t('stranger cannot read a private user activity', () => assertFails(getDoc(activityRef(dave, 'carol', 'carol-e1'))));
+// heidi was accepted as a follower of bob further up.
+await t('accepted follower reads an invite_only user activity', () => assertSucceeds(getDoc(activityRef(as('heidi'), 'bob', 'bob-e1'))));
+await t('accepted follower lists an invite_only user activity', () => assertSucceeds(getDocs(activityCol(as('heidi'), 'bob'))));
+
+console.log('Activity events: the feed query (S7) and client writes');
+// Rules are not filters: a `list` is authorised against the query, not against
+// each returned document, so a rule reading resource.data cannot authorise a
+// collection group query however it is constrained. A feed page is therefore
+// one path-scoped query per friend — which is what these first cases are.
+const feedPage = (db, uid) => query(activityCol(db, uid), orderBy('createdAt', 'desc'), limit(30));
+await t('a feed page of a followed user is readable', () => assertSucceeds(getDocs(feedPage(as('heidi'), 'bob'))));
+await t('a feed page of a public user is readable', () => assertSucceeds(getDocs(feedPage(dave, 'alice'))));
+await t('a feed page of a private user is denied', () => assertFails(getDocs(feedPage(dave, 'carol'))));
+await t('a feed page of an invite_only user you do not follow is denied', () => assertFails(getDocs(feedPage(as('frank'), 'bob'))));
+await t('a blocked user cannot page a public user', () => assertFails(getDocs(feedPage(mallory, 'alice'))));
+
+const groupFor = (db, uid) => query(collectionGroup(db, 'activity'), where('uid', '==', uid));
+await t('collection group query is denied even for a followed user', () => assertFails(getDocs(groupFor(as('heidi'), 'bob'))));
+await t('collection group query is denied for a public user', () => assertFails(getDocs(groupFor(dave, 'alice'))));
+await t('collection group query is denied for a private user', () => assertFails(getDocs(groupFor(dave, 'carol'))));
+await t('unfiltered collection group query is denied', () => assertFails(getDocs(collectionGroup(dave, 'activity'))));
+await t('owner cannot write their own activity', () => assertFails(setDoc(activityRef(alice, 'alice', 'forged'), event('alice'))));
+await t('owner cannot edit their own activity', () => assertFails(setDoc(activityRef(alice, 'alice', 'alice-e1'), { type: 'game_completed' }, { merge: true })));
+await t('owner cannot delete their own activity', () => assertFails(deleteDoc(activityRef(alice, 'alice', 'alice-e1'))));
+await t('stranger cannot write to someone else activity', () => assertFails(setDoc(activityRef(dave, 'alice', 'forged2'), event('alice'))));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();

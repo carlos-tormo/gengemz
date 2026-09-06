@@ -68,6 +68,8 @@ export const INITIAL_DATA = {
       id: 'playing',
       title: 'Currently Playing',
       icon: 'gamepad',
+      // Games moved here count as started (S5 activity events, S6 friends view).
+      isPlaying: true,
       itemIds: [],
     },
     completed: {

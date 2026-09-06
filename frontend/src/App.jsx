@@ -98,7 +98,7 @@ export default function App() {
   
   // Modals
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
-  const [columnForm, setColumnForm] = useState({ id: '', title: '', icon: 'gamepad', isCompletion: false });
+  const [columnForm, setColumnForm] = useState({ id: '', title: '', icon: 'gamepad', isCompletion: false, isPlaying: false });
   const [isEditingColumn, setIsEditingColumn] = useState(false);
   const [deleteMode, setDeleteMode] = useState('move'); // 'move' | 'delete'
   const [deleteTarget, setDeleteTarget] = useState('');
@@ -646,8 +646,13 @@ export default function App() {
     boardActions.toggleFavorite(id);
   };
 
-  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad', isCompletion: false }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
-  const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad', isCompletion: c.isCompletion === true }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
+  // The list currently flagged as "currently playing" (at most one).
+  const playingListTitle = data.columnOrder
+    .map((id) => data.columns[id])
+    .find((column) => column?.isPlaying === true)?.title || '';
+
+  const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad', isCompletion: false, isPlaying: false }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
+  const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad', isCompletion: c.isCompletion === true, isPlaying: c.isPlaying === true }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
   
   const handleSaveColumn = (e) => {
     e.preventDefault(); if (!columnForm.title.trim()) return;
@@ -1681,7 +1686,11 @@ export default function App() {
             <input
               type="checkbox"
               checked={columnForm.isCompletion === true}
-              onChange={(e) => setColumnForm({ ...columnForm, isCompletion: e.target.checked })}
+              onChange={(e) => setColumnForm({
+                ...columnForm,
+                isCompletion: e.target.checked,
+                isPlaying: e.target.checked ? false : columnForm.isPlaying,
+              })}
               className="mt-0.5 accent-purple-600"
             />
             <span>
@@ -1692,6 +1701,29 @@ export default function App() {
                 {columnForm.isCompletion
                   ? 'Unticking this clears those dates for the games in this list.'
                   : 'Ticking this dates the games already in this list as completed now.'}
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 p-3 border border-[var(--border)] rounded-lg bg-[var(--panel-muted)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={columnForm.isPlaying === true}
+              onChange={(e) => setColumnForm({
+                ...columnForm,
+                isPlaying: e.target.checked,
+                isCompletion: e.target.checked ? false : columnForm.isCompletion,
+              })}
+              className="mt-0.5 accent-purple-600"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[var(--text)]">This is my &ldquo;currently playing&rdquo; list</span>
+              <span className="block text-xs text-[var(--text-muted)] mt-0.5">
+                Moving a game here tells your friends you started it, and it is the game shown next to your name.
+                {' '}
+                {playingListTitle && playingListTitle !== columnForm.title && !columnForm.isPlaying
+                  ? `Right now that is "${playingListTitle}" \u2014 ticking this moves it here.`
+                  : 'Only one list can be this at a time.'}
               </span>
             </span>
           </label>

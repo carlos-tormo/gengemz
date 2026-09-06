@@ -11,7 +11,9 @@ import {
   computeUserStats,
   deleteColumnFromBoardData,
   isCompletionColumn,
+  isPlayingColumn,
   moveGameOnBoardData,
+  playingColumnId,
   patchGameOnBoardData,
   reorderGameOnBoardData,
   saveColumnToBoardData,
@@ -211,6 +213,58 @@ t('limits are configurable', () => {
   const stats = computeUserStats(board(), { topRatedLimit: 1, recentLimit: 1 });
   assert.equal(stats.topRated.length, 1);
   assert.equal(stats.recentlyCompleted.length, 1);
+});
+
+console.log('The "currently playing" list (S5/S6)');
+
+const playingBoard = () => {
+  const model = board();
+  model.columns.playing = { ...model.columns.playing, isPlaying: true };
+  return model;
+};
+
+t('the flagged list is found, and nothing is found without one', () => {
+  assert.equal(playingColumnId(playingBoard()), 'playing');
+  assert.equal(isPlayingColumn(playingBoard(), 'playing'), true);
+  assert.equal(isPlayingColumn(playingBoard(), 'backlog'), false);
+  assert.equal(playingColumnId(board()), null);
+});
+
+t('flagging a list takes the flag off the previous one', () => {
+  const model = playingBoard();
+  const change = saveColumnToBoardData(model, { id: 'backlog', title: 'To Play', icon: 'clock', isPlaying: true }, true);
+  const columns = change.boardPatch.columns;
+  assert.equal(columns.backlog.isPlaying, true);
+  assert.equal('isPlaying' in columns.playing, false);
+  assert.equal(playingColumnId(applyChange(model, change)), 'backlog');
+});
+
+t('a new list can claim the flag too', () => {
+  const model = playingBoard();
+  const change = saveColumnToBoardData(model, { id: 'now', title: 'Now', icon: 'zap', isPlaying: true }, false);
+  assert.equal(change.boardPatch.columns.now.isPlaying, true);
+  assert.equal('isPlaying' in change.boardPatch.columns.playing, false);
+});
+
+t('unflagging leaves no list flagged, and stamps no dates', () => {
+  const model = playingBoard();
+  const change = saveColumnToBoardData(model, { id: 'playing', title: 'Currently Playing', icon: 'gamepad', isPlaying: false }, true);
+  assert.equal('isPlaying' in change.boardPatch.columns.playing, false);
+  assert.deepEqual(change.gameWrites, []);
+  assert.equal(playingColumnId(applyChange(model, change)), null);
+});
+
+t('a completion list keeps its own flag when another claims playing', () => {
+  const model = playingBoard();
+  const change = saveColumnToBoardData(model, { id: 'backlog', title: 'To Play', icon: 'clock', isPlaying: true }, true);
+  assert.equal(change.boardPatch.columns.completed.isCompletion, true);
+});
+
+t('renaming a list keeps the flag it already had', () => {
+  const model = playingBoard();
+  const change = saveColumnToBoardData(model, { id: 'playing', title: 'En curso', icon: 'gamepad', isPlaying: true, isCompletion: false }, true);
+  assert.equal(change.boardPatch.columns.playing.isPlaying, true);
+  assert.equal(change.boardPatch.columns.playing.title, 'En curso');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

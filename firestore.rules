@@ -46,6 +46,24 @@ service cloud.firestore {
         );
     }
 
+    // An accepted follower, without reading the follow document itself: every
+    // followers entry the rules accept has status "following", and blocking
+    // deletes the entry on both sides. Two document reads instead of
+    // canViewBoard's five, which is what keeps a feed page — one query per
+    // friend — affordable.
+    function isFollowerOf(appId, ownerUid) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/relationships/$(ownerUid)/followers/$(request.auth.uid));
+    }
+
+    // Same visibility as the board (design decision 4), reached by the cheap
+    // path first: a feed page is one query per friend, so this runs once per
+    // friend shown.
+    function canViewActivity(appId, ownerUid) {
+      return signedIn() &&
+        !isBlockedBy(appId, ownerUid) &&
+        (isFollowerOf(appId, ownerUid) || canViewBoard(appId, ownerUid));
+    }
+
     function validPrivacy(value) {
       return value in ["public", "invite_only", "private"];
     }
@@ -138,7 +156,8 @@ service cloud.firestore {
           "isFavorite",
           "addedAt",
           "updatedAt",
-          "completedAt"
+          "completedAt",
+          "migratedAt"
         ]) &&
         data.id == gameId &&
         validString(data.title, 200) &&
@@ -155,6 +174,9 @@ service cloud.firestore {
         validOptionalString(data, "genre", 80) &&
         validOptionalString(data, "year", 10) &&
         validOptionalTimestamp(data, "completedAt") &&
+        // Set by the schema 1 -> 2 migration so S5's activity trigger can tell
+        // a bulk import from something the user just did.
+        validOptionalTimestamp(data, "migratedAt") &&
         data.addedAt is timestamp &&
         data.updatedAt == request.time;
     }
@@ -393,6 +415,21 @@ service cloud.firestore {
         allow update: if isOwner(userId) &&
           validGameUpdate(gameId, resource.data, request.resource.data);
         allow delete: if isOwner(userId);
+      }
+
+      // Activity events (S5). Written only by the Cloud Functions triggers,
+      // which use the admin SDK and bypass rules entirely — clients never
+      // write here.
+      //
+      // Scoped by path, like the games above, and NOT by a recursive
+      // `/{path=**}/activity/{eventId}` wildcard reading resource.data: rules
+      // are not filters, so a `list` is authorised against the query rather
+      // than against each returned document, and a rule the query cannot
+      // prove denies the whole query. That makes a follower-scoped collection
+      // group query impossible — see the note on S7 in the roadmap.
+      match /users/{userId}/activity/{eventId} {
+        allow read: if isOwner(userId) || canViewActivity(appId, userId);
+        allow write: if false;
       }
 
       match /public_profiles/{profileId} {
