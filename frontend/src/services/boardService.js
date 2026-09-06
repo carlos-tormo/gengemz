@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, writeBatch,
+  collection, doc, getDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 import { APP_ID, INITIAL_DATA } from '../config/constants';
 import { db } from '../config/firebase';
@@ -90,10 +90,81 @@ export const toBoardView = (model) => {
   };
 };
 
+/* ---------- legacy -> v2 normalisation ---------- */
+
+const COMPLETION_COLUMN_ID = 'completed';
+
+// Optional string fields of a schema-2 game document, with the length the
+// rules allow (see `validGameShape` in firestore.rules). `addedAt`/`updatedAt`
+// are written by the server and never copied from old data.
+const GAME_STRING_FIELDS = {
+  cover: 1000,
+  rawgId: 40,
+  rawgSlug: 160,
+  externalSource: 40,
+  platform: 160,
+  genre: 80,
+  year: 10,
+};
+
+const asString = (value, maxLength) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  return String(value).slice(0, maxLength) || undefined;
+};
+
+/**
+ * Legacy boards seeded `rating` with RAWG's community score — a 0–5 float — so
+ * a fractional value is never a score the user gave. The star UI only ever
+ * writes integers 1–10, so those are kept and anything else resets to unrated.
+ */
+const normalizeRating = (value) => {
+  const rating = Number(value);
+  if (!Number.isInteger(rating)) return 0;
+  return Math.min(10, Math.max(0, rating));
+};
+
+const isTimestampLike = (value) => value instanceof Date
+  || (!!value && typeof value === 'object' && typeof value.toDate === 'function');
+
+/**
+ * Coerces a stored game of any age into a document the schema-2 rules accept:
+ * known keys only, string lengths clamped, `rating` an int 0–10, `isFavorite`
+ * a bool, `position` a number.
+ */
+export const normalizeGameForV2 = (game, { id, columnId, position }) => {
+  const source = game || {};
+  const normalized = {
+    id,
+    title: asString(source.title, 200) ?? '',
+    columnId: String(columnId).slice(0, 40),
+    position: Number.isFinite(Number(position)) ? Number(position) : 0,
+    rating: normalizeRating(source.rating),
+    isFavorite: source.isFavorite === true,
+  };
+  Object.entries(GAME_STRING_FIELDS).forEach(([field, maxLength]) => {
+    const value = asString(source[field], maxLength);
+    if (value !== undefined) normalized[field] = value;
+  });
+  const coverIndex = Number(source.coverIndex);
+  normalized.coverIndex = Number.isInteger(coverIndex) && coverIndex >= 0 && coverIndex <= 100
+    ? coverIndex
+    : 0;
+  if (isTimestampLike(source.completedAt)) normalized.completedAt = source.completedAt;
+  return normalized;
+};
+
+/** The default "completed" column is what S4/S5 read as "finished". */
+const withCompletionFlag = (columns) => {
+  const column = columns?.[COMPLETION_COLUMN_ID];
+  if (!column || column.isCompletion === true) return columns;
+  return { ...columns, [COMPLETION_COLUMN_ID]: { ...column, isCompletion: true } };
+};
+
 /**
  * Builds a model from a legacy (schema 1) board document: position = index in
- * `itemIds`. Games no column references are dropped, exactly like the old
- * `pruneOrphanedBoardData` did.
+ * `itemIds`, every game normalised to the v2 shape. Games no column references
+ * — including the zombies the old `merge: true` saves left behind — land at the
+ * end of the first column instead of being dropped.
  */
 export const modelFromLegacyBoard = (board) => {
   const games = {};
@@ -106,10 +177,21 @@ export const modelFromLegacyBoard = (board) => {
     (Array.isArray(itemIds) ? itemIds : []).forEach((gameId, index) => {
       const game = board.games?.[gameId];
       if (!game || games[gameId]) return;
-      games[gameId] = { ...game, id: gameId, columnId, position: index };
+      games[gameId] = normalizeGameForV2(game, { id: gameId, columnId, position: index });
     });
   });
-  return { schemaVersion: 1, columns, columnOrder, games };
+
+  const fallbackColumnId = columnOrder[0];
+  if (fallbackColumnId) {
+    let position = Object.values(games).filter((game) => game.columnId === fallbackColumnId).length;
+    Object.entries(board?.games || {}).forEach(([gameId, game]) => {
+      if (games[gameId]) return;
+      games[gameId] = normalizeGameForV2(game, { id: gameId, columnId: fallbackColumnId, position });
+      position += 1;
+    });
+  }
+
+  return { schemaVersion: 1, columns: withCompletionFlag(columns), columnOrder, games };
 };
 
 /** Model → schema-1 document (used only while a user is still on schema 1). */
@@ -324,9 +406,10 @@ export const applyChange = (model, change) => {
 /**
  * Persists a change as write batches. The board document is written whenever
  * the change patches it or `includeBoard` is set (first write of a fresh
- * account, which has no board document yet).
+ * account, which has no board document yet), in the first batch unless
+ * `boardLast` moves it to the end.
  */
-export const commitBoardChange = async (uid, model, change, { includeBoard = false } = {}) => {
+export const commitBoardChange = async (uid, model, change, { includeBoard = false, boardLast = false } = {}) => {
   if (!uid || isNoopChange(change)) return;
   const writes = change.gameWrites || [];
   const batches = [];
@@ -342,7 +425,10 @@ export const commitBoardChange = async (uid, model, change, { includeBoard = fal
   }
   if (change.boardPatch || includeBoard) {
     const next = { ...model, ...(change.boardPatch || {}) };
-    batches[0].set(boardDoc(uid), { ...toBoardDoc(next), updatedAt: serverTimestamp() });
+    // The migration writes it last, so an interrupted run leaves the account on
+    // schema 1 and simply runs again; everything else writes it first.
+    const target = boardLast ? batches[batches.length - 1] : batches[0];
+    target.set(boardDoc(uid), { ...toBoardDoc(next), updatedAt: serverTimestamp() });
   }
   for (const batch of batches) await batch.commit();
 };
@@ -377,52 +463,96 @@ export const loadBoardView = async (uid) => {
   return toBoardView({ ...board, games });
 };
 
+/* ---------- schema 1 → schema 2 migration (S3) ---------- */
+
+const migrations = new Map();
+
+const runMigration = async (uid) => {
+  // Re-read rather than trust the snapshot that triggered us: another tab (or
+  // an earlier attempt in this one) may have migrated the account already.
+  const snapshot = await getDoc(boardDoc(uid));
+  const board = snapshot.exists() ? snapshot.data() : null;
+  if (isV2Board(board)) return null;
+
+  const model = modelFromLegacyBoard(board);
+
+  // An interrupted attempt may have written some game documents already.
+  // Rewriting those as creates would move `addedAt`, which the rules refuse,
+  // so they are patched instead.
+  const existing = new Set();
+  const existingSnap = await getDocs(gamesCollection(uid));
+  existingSnap.forEach((docSnap) => existing.add(docSnap.id));
+
+  const change = {
+    boardPatch: { columns: model.columns, columnOrder: model.columnOrder },
+    gameWrites: Object.values(model.games).map((game) => (
+      existing.has(game.id) ? { id: game.id, data: game, merge: true } : { id: game.id, data: game }
+    )),
+  };
+
+  await commitBoardChange(uid, model, change, { boardLast: true });
+  return { ...model, schemaVersion: GAMES_SCHEMA_VERSION };
+};
+
+/** True while a migration for this uid is in flight (see below). */
+export const isBoardMigrating = (uid) => migrations.has(uid);
+
+/**
+ * Migrates one account from board schema 1 to schema 2 in place: a game
+ * document per entry of the old `games` map, positions from `itemIds`, and a
+ * board document that keeps only the columns.
+ *
+ * Idempotent — on an already-migrated board it reads the board document and
+ * returns null, otherwise it resolves with the migrated model. Concurrent
+ * callers (two tabs, or the guest merge racing the board listener) share one
+ * in-flight run per uid.
+ */
+export const migrateLegacyBoard = (uid) => {
+  if (!uid) return Promise.resolve(null);
+  if (!migrations.has(uid)) {
+    migrations.set(uid, runMigration(uid).finally(() => migrations.delete(uid)));
+  }
+  return migrations.get(uid);
+};
+
 /* ---------- guest → account merge ---------- */
 
 /**
  * Copies the anonymous session's games into the signed-in user's board,
  * skipping games the target already has (same identity). Games whose column
  * id doesn't exist on the target land in its first column.
+ *
+ * The target is migrated to schema 2 first (a no-op for the common case), so
+ * there is only one merge path. Kept in preference to review B6's
+ * `linkWithPopup`, which is an auth change of its own. A failed migration
+ * rejects here too: the caller logs it and the target board is left untouched.
  */
 export const mergeGuestBoardIntoUserBoard = async (guestModel, targetUid) => {
   const guestGames = Object.values(guestModel?.games || {});
   if (guestGames.length === 0) return;
 
+  await migrateLegacyBoard(targetUid);
+
   const targetSnap = await getDoc(boardDoc(targetUid));
   const targetBoard = targetSnap.exists() ? targetSnap.data() : null;
 
-  if (targetBoard && !isV2Board(targetBoard)) {
-    // Target account is still on schema 1: merge into the single document as before.
-    const target = modelFromLegacyBoard(targetBoard);
-    let model = target;
-    guestGames.filter((game) => !Object.values(target.games).some((stored) => sameGameIdentity(stored, game)))
-      .forEach((game) => {
-        const columnId = model.columns[game.columnId] ? game.columnId : model.columnOrder[0];
-        model = applyChange(model, { gameWrites: placeInColumn(model, columnId, game.id, Infinity, game) });
-      });
-    await setDoc(boardDoc(targetUid), toLegacyBoardDoc(model));
-    return;
-  }
-
-  let model = targetBoard
-    ? { ...targetBoard, games: {} }
-    : emptyModel();
+  const model = targetBoard ? { ...targetBoard, games: {} } : emptyModel();
   const existingSnap = await getDocs(gamesCollection(targetUid));
   existingSnap.forEach((docSnap) => { model.games[docSnap.id] = { ...docSnap.data(), id: docSnap.id }; });
 
+  let merged = model;
   const writes = [];
   guestGames
-    .filter((game) => !Object.values(model.games).some((stored) => sameGameIdentity(stored, game)))
+    .filter((game) => !Object.values(merged.games).some((stored) => sameGameIdentity(stored, game)))
     .forEach((game) => {
-      const columnId = model.columns[game.columnId] ? game.columnId : model.columnOrder[0];
-      const { addedAt: _a, updatedAt: _u, ...fields } = game;
-      const [placement, ...renumbered] = placeInColumn(model, columnId, game.id, Infinity);
-      const data = sanitizeGame({ ...fields, columnId, position: placement.data.position });
+      const columnId = merged.columns[game.columnId] ? game.columnId : merged.columnOrder[0];
+      const [placement, ...renumbered] = placeInColumn(merged, columnId, game.id, Infinity);
+      const data = normalizeGameForV2(game, { id: game.id, columnId, position: placement.data.position });
       writes.push({ id: game.id, data }, ...renumbered);
-      model = applyChange(model, { gameWrites: [{ id: game.id, data }, ...renumbered] });
+      merged = applyChange(merged, { gameWrites: [{ id: game.id, data }, ...renumbered] });
     });
 
-  await commitBoardChange(targetUid, model, { gameWrites: mergeWrites(writes) }, { includeBoard: !targetBoard });
+  await commitBoardChange(targetUid, merged, { gameWrites: mergeWrites(writes) }, { includeBoard: !targetBoard });
 };
 
 /* ---------- misc ---------- */

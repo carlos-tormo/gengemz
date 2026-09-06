@@ -74,6 +74,8 @@ export const INITIAL_DATA = {
       id: 'completed',
       title: 'Victory Road',
       icon: 'trophy',
+      // Games moved here count as finished (S4 progression, S5 activity events).
+      isCompletion: true,
       itemIds: [],
     },
   },

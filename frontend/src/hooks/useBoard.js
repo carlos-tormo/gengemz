@@ -7,9 +7,11 @@ import {
   commitBoardChange,
   deleteColumnFromBoardData,
   emptyModel,
+  isBoardMigrating,
   isNoopChange,
   isV2Board,
   mergeGuestBoardIntoUserBoard,
+  migrateLegacyBoard,
   modelFromLegacyBoard,
   moveGameOnBoardData,
   patchGameOnBoardData,
@@ -30,9 +32,10 @@ import useDebouncedSave from './useDebouncedSave';
  *
  * Schema 2 accounts (and brand-new accounts) get two listeners — data/board
  * and the games collection — and every action is committed immediately as a
- * write batch. Accounts still on schema 1 (until S3 migrates them) keep the
- * old debounced full-document save; both paths share the same in-memory
- * model and the same pure change builders.
+ * write batch. An account still on schema 1 is migrated on first load
+ * (`migrateLegacyBoard`) while the board still shows its loading state; only
+ * if that fails does it fall back to the old debounced full-document save.
+ * Both paths share the same in-memory model and the same pure change builders.
  *
  * `data` is the pre-v2 view ({ columns[id].itemIds, games, columnOrder }) so
  * BoardPage, Column, GameCard, list view and favourites work unchanged.
@@ -43,8 +46,9 @@ const useBoard = (user) => {
   const model = user && modelState.uid === user.uid ? modelState.model : null;
   const [loadedUserId, setLoadedUserId] = useState(null);
   const modelRef = useRef(null);
-  const modeRef = useRef('v2'); // 'v2' | 'legacy'
+  const modeRef = useRef('v2'); // 'v2' | 'migrating' | 'legacy'
   const boardExistsRef = useRef(false);
+  const migrationTriedRef = useRef(null); // uid whose migration already ran (once per session)
   const { status: saveStatus, save: saveLegacy, run } = useDebouncedSave(user);
 
   const data = useMemo(() => toBoardView(model), [model]);
@@ -59,10 +63,18 @@ const useBoard = (user) => {
     let board;          // undefined until the first board snapshot
     let games;          // undefined until the first games snapshot (v2 only)
     let unsubscribeGames = null;
+    let migrating = false;
+    let cancelled = false;
     modelRef.current = null;
-    const timeout = setTimeout(() => setLoadedUserId(user.uid), 3000);
+    // A slow (or offline) migration must not hold the board hostage: show the
+    // schema-1 view, but stay in 'migrating' mode so edits queue behind it.
+    const timeout = setTimeout(() => {
+      if (migrating && board) publish(modelFromLegacyBoard(board));
+      else setLoadedUserId(user.uid);
+    }, 3000);
 
     const publish = (next) => {
+      if (cancelled) return;
       clearTimeout(timeout);
       modelRef.current = next;
       setModelState({ uid: user.uid, model: next });
@@ -70,14 +82,22 @@ const useBoard = (user) => {
     };
 
     const fail = (error) => {
+      if (cancelled) return;
       clearTimeout(timeout);
       setLoadedUserId(user.uid);
       console.error('Board load failed', error);
     };
 
+    const showLegacy = () => {
+      modeRef.current = 'legacy';
+      boardExistsRef.current = true;
+      publish(modelFromLegacyBoard(board));
+    };
+
     const unsubscribeBoard = subscribeToBoard(user, (boardDoc) => {
       board = boardDoc;
       if (isV2Board(board)) {
+        migrating = false;
         modeRef.current = 'v2';
         boardExistsRef.current = !!board;
         if (!unsubscribeGames) {
@@ -88,16 +108,34 @@ const useBoard = (user) => {
         } else if (games !== undefined) {
           publish({ ...(board || emptyModel()), games });
         }
-      } else {
-        // Legacy schema 1 document — handled in place until S3 migrates it.
-        modeRef.current = 'legacy';
-        boardExistsRef.current = true;
-        if (unsubscribeGames) { unsubscribeGames(); unsubscribeGames = null; }
-        publish(modelFromLegacyBoard(board));
+        return;
       }
+
+      // Schema 1 document.
+      if (unsubscribeGames) { unsubscribeGames(); unsubscribeGames = null; }
+      if (migrationTriedRef.current === user.uid && !isBoardMigrating(user.uid)) {
+        // Migration already ran and failed this session — keep the old path.
+        showLegacy();
+        return;
+      }
+
+      // Migrate in place (S3) before showing the board, so no edit can be made
+      // against the schema the account is about to leave. On success the board
+      // listener fires again with the v2 document and takes the branch above.
+      // A run already in flight (this hook remounted) is joined, not repeated.
+      migrationTriedRef.current = user.uid;
+      migrating = true;
+      modeRef.current = 'migrating';
+      boardExistsRef.current = true;
+      migrateLegacyBoard(user.uid).catch((error) => {
+        console.error('Board migration failed, staying on schema 1', error);
+        migrating = false;
+        showLegacy();
+      });
     }, fail);
 
     return () => {
+      cancelled = true;
       clearTimeout(timeout);
       unsubscribeBoard();
       if (unsubscribeGames) unsubscribeGames();
@@ -115,6 +153,15 @@ const useBoard = (user) => {
 
     if (modeRef.current === 'legacy') {
       saveLegacy(toLegacyBoardDoc(next));
+      return;
+    }
+    if (modeRef.current === 'migrating') {
+      // The board isn't interactive while the migration runs, but another tab
+      // (or a queued action) can still land here: wait for it, then write v2.
+      run(async () => {
+        const migrated = await migrateLegacyBoard(user.uid);
+        await commitBoardChange(user.uid, migrated || prev, change);
+      });
       return;
     }
     const includeBoard = !boardExistsRef.current;

@@ -177,6 +177,41 @@ await t('accepted follower reads invite_only user game', async () => {
   await assertSucceeds(getDoc(gameRef(as('heidi'), 'bob', 'g1')));
 });
 
+console.log('Migration schema 1 -> 2 (S3)');
+// yara is still on schema 1: her games live in the board document.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(P(db, 'public_profiles', 'yara'), { uid: 'yara', privacy: 'public', displayName: 'yara' });
+  await setDoc(boardRef(db, 'yara'), {
+    games: { old1: { id: 'old1', title: 'Hollow Knight', rating: 4.42, isFavorite: true }, old2: { id: 'old2', title: 'Tunic', rating: 8 } },
+    columns: { backlog: { id: 'backlog', title: 'To Play', icon: 'clock', itemIds: ['old1'] } },
+    columnOrder: ['backlog'],
+  });
+});
+const yara = as('yara');
+
+await t('games can be created while the board is still schema 1', () => assertSucceeds(
+  setDoc(gameRef(yara, 'yara', 'old1'), game('old1', { rating: 0, isFavorite: true, position: 0 })),
+));
+await t('migration batch writes the games and flips the board to v2', async () => {
+  const b = writeBatch(yara);
+  b.set(gameRef(yara, 'yara', 'old2'), game('old2', { rating: 8, position: 1 }));
+  b.set(boardRef(yara, 'yara'), v2Board());
+  await assertSucceeds(b.commit());
+});
+await t('re-running patches an existing game without moving addedAt', () => assertSucceeds(
+  setDoc(gameRef(yara, 'yara', 'old1'), { title: 'Hollow Knight', columnId: 'backlog', position: 0, rating: 0, isFavorite: true, updatedAt: serverTimestamp() }, { merge: true }),
+));
+await t('re-running cannot downgrade the migrated board', () => assertFails(
+  setDoc(boardRef(yara, 'yara'), { games: {}, columns: {}, columnOrder: [] }),
+));
+await t('migration cannot leave the games map on the v2 board', () => assertFails(
+  setDoc(boardRef(yara, 'yara'), { ...v2Board(), games: {} }),
+));
+await t('a legacy float rating cannot be carried over as-is', () => assertFails(
+  setDoc(gameRef(yara, 'yara', 'old3'), game('old3', { rating: 4.42 })),
+));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();
 process.exit(failed ? 1 : 0);
