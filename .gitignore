@@ -75,3 +75,9 @@ dist
 .env.local
 # local scratch
 _to_delete/
+
+# Andamiaje de los agentes (handoff de fase e implement-epic)
+.agents/tasks/
+
+# Evidencias de QA (se commitean con -f y se revierten al mergear)
+.qa-evidence/

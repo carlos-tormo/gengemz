@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"$HOME/projects/agent-flow/scripts/check-agents-links.sh\" ] && \"$HOME/projects/agent-flow/scripts/check-agents-links.sh\" \"$CLAUDE_PROJECT_DIR\" || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"$HOME/projects/agent-flow/scripts/route-context.sh\" ] && \"$HOME/projects/agent-flow/scripts/route-context.sh\" || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
