@@ -4,9 +4,10 @@
   "type": "module",
   "scripts": {
     "test": "cd .. && npx firebase emulators:exec --only firestore --project rules-test \"node tests/firestore.rules.test.mjs\"",
-    "test:migration": "cd .. && node --import ./tests/register-stubs.mjs tests/boardMigration.test.mjs && node --import ./tests/register-stubs.mjs tests/progression.test.mjs && node --import ./tests/register-stubs.mjs tests/relationships.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/boardMigrationCommit.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/progressionCommit.test.mjs && node tests/activityEvents.test.mjs",
-    "test:unit": "cd .. && node --import ./tests/register-stubs.mjs tests/boardMigration.test.mjs && node --import ./tests/register-stubs.mjs tests/progression.test.mjs && node --import ./tests/register-stubs.mjs tests/relationships.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/boardMigrationCommit.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/progressionCommit.test.mjs && node tests/activityEvents.test.mjs",
-    "test:activity": "cd .. && node tests/activityEvents.test.mjs"
+    "test:migration": "cd .. && node --import ./tests/register-stubs.mjs tests/boardMigration.test.mjs && node --import ./tests/register-stubs.mjs tests/progression.test.mjs && node --import ./tests/register-stubs.mjs tests/relationships.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/boardMigrationCommit.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/progressionCommit.test.mjs && node tests/activityEvents.test.mjs && node --import ./tests/register-stubs.mjs tests/feed.test.mjs",
+    "test:unit": "cd .. && node --import ./tests/register-stubs.mjs tests/boardMigration.test.mjs && node --import ./tests/register-stubs.mjs tests/progression.test.mjs && node --import ./tests/register-stubs.mjs tests/relationships.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/boardMigrationCommit.test.mjs && GGZ_FAKE_FIRESTORE=1 node --import ./tests/register-stubs.mjs tests/progressionCommit.test.mjs && node tests/activityEvents.test.mjs && node --import ./tests/register-stubs.mjs tests/feed.test.mjs",
+    "test:activity": "cd .. && node tests/activityEvents.test.mjs",
+    "test:feed": "cd .. && node --import ./tests/register-stubs.mjs tests/feed.test.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
