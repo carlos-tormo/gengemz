@@ -1,67 +1,128 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { INITIAL_DATA } from '../config/constants';
 import {
   addGameToBoardData,
+  applyChange,
   cleanGameDuplicates,
+  commitBoardChange,
   deleteColumnFromBoardData,
+  emptyModel,
+  isNoopChange,
+  isV2Board,
   mergeGuestBoardIntoUserBoard,
+  modelFromLegacyBoard,
   moveGameOnBoardData,
   patchGameOnBoardData,
-  pruneOrphanedBoardData,
   removeGameFromBoardData,
+  reorderGameOnBoardData,
   saveColumnToBoardData,
   subscribeToBoard,
+  subscribeToGames,
+  toBoardView,
+  toLegacyBoardDoc,
   toggleFavoriteOnBoardData,
 } from '../services/boardService';
-import { createClientId, findExistingGameId, getGameColumnId } from '../utils/gameUtils';
+import { createClientId, findExistingGameId } from '../utils/gameUtils';
 import useDebouncedSave from './useDebouncedSave';
 
+/**
+ * Owns the signed-in user's board.
+ *
+ * Schema 2 accounts (and brand-new accounts) get two listeners — data/board
+ * and the games collection — and every action is committed immediately as a
+ * write batch. Accounts still on schema 1 (until S3 migrates them) keep the
+ * old debounced full-document save; both paths share the same in-memory
+ * model and the same pure change builders.
+ *
+ * `data` is the pre-v2 view ({ columns[id].itemIds, games, columnOrder }) so
+ * BoardPage, Column, GameCard, list view and favourites work unchanged.
+ */
 const useBoard = (user) => {
-  const [data, setData] = useState(INITIAL_DATA);
+  // Keyed by uid so switching accounts never shows the previous user's board.
+  const [modelState, setModelState] = useState({ uid: null, model: null });
+  const model = user && modelState.uid === user.uid ? modelState.model : null;
   const [loadedUserId, setLoadedUserId] = useState(null);
-  const dataRef = useRef(INITIAL_DATA);
-  const { status: saveStatus, save: triggerSave } = useDebouncedSave(user);
+  const modelRef = useRef(null);
+  const modeRef = useRef('v2'); // 'v2' | 'legacy'
+  const boardExistsRef = useRef(false);
+  const { status: saveStatus, save: saveLegacy, run } = useDebouncedSave(user);
 
+  const data = useMemo(() => toBoardView(model), [model]);
+  const dataRef = useRef(INITIAL_DATA);
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
-  const saveBoard = useCallback((updater) => {
-    setData((prev) => {
-      const newData = typeof updater === 'function' ? updater(prev) : updater;
-      triggerSave(newData);
-      return newData;
-    });
-  }, [triggerSave]);
-
   useEffect(() => {
     if (!user) return undefined;
 
+    let board;          // undefined until the first board snapshot
+    let games;          // undefined until the first games snapshot (v2 only)
+    let unsubscribeGames = null;
+    modelRef.current = null;
     const timeout = setTimeout(() => setLoadedUserId(user.uid), 3000);
-    const unsubscribe = subscribeToBoard(
-      user,
-      (boardData) => {
-        clearTimeout(timeout);
-        // One-off cleanup of "zombie" games/columns left behind by the old
-        // { merge: true } saves. If anything was pruned, write the clean
-        // document back once; the next snapshot will then match and no-op.
-        const cleaned = pruneOrphanedBoardData(boardData);
-        setData(cleaned);
-        if (cleaned !== boardData) triggerSave(cleaned);
-        setLoadedUserId(user.uid);
-      },
-      (error) => {
-        clearTimeout(timeout);
-        setLoadedUserId(user.uid);
-        console.error('Board load failed', error);
-      },
-    );
+
+    const publish = (next) => {
+      clearTimeout(timeout);
+      modelRef.current = next;
+      setModelState({ uid: user.uid, model: next });
+      setLoadedUserId(user.uid);
+    };
+
+    const fail = (error) => {
+      clearTimeout(timeout);
+      setLoadedUserId(user.uid);
+      console.error('Board load failed', error);
+    };
+
+    const unsubscribeBoard = subscribeToBoard(user, (boardDoc) => {
+      board = boardDoc;
+      if (isV2Board(board)) {
+        modeRef.current = 'v2';
+        boardExistsRef.current = !!board;
+        if (!unsubscribeGames) {
+          unsubscribeGames = subscribeToGames(user, (nextGames) => {
+            games = nextGames;
+            publish({ ...(board || emptyModel()), games });
+          }, fail);
+        } else if (games !== undefined) {
+          publish({ ...(board || emptyModel()), games });
+        }
+      } else {
+        // Legacy schema 1 document — handled in place until S3 migrates it.
+        modeRef.current = 'legacy';
+        boardExistsRef.current = true;
+        if (unsubscribeGames) { unsubscribeGames(); unsubscribeGames = null; }
+        publish(modelFromLegacyBoard(board));
+      }
+    }, fail);
 
     return () => {
       clearTimeout(timeout);
-      unsubscribe();
+      unsubscribeBoard();
+      if (unsubscribeGames) unsubscribeGames();
     };
-  }, [user, triggerSave]);
+  }, [user]);
+
+  /** Applies a change locally (optimistic) and persists it. */
+  const commit = useCallback((change) => {
+    if (isNoopChange(change)) return;
+    const prev = modelRef.current || emptyModel();
+    const next = applyChange(prev, change);
+    modelRef.current = next;
+    setModelState({ uid: user?.uid ?? null, model: next });
+    if (!user) return;
+
+    if (modeRef.current === 'legacy') {
+      saveLegacy(toLegacyBoardDoc(next));
+      return;
+    }
+    const includeBoard = !boardExistsRef.current;
+    boardExistsRef.current = true;
+    run(() => commitBoardChange(user.uid, prev, change, { includeBoard }));
+  }, [user, saveLegacy, run]);
+
+  const current = useCallback(() => modelRef.current || emptyModel(), []);
 
   const performSmartMigration = useCallback(async (guestData, targetUid) => {
     try {
@@ -72,64 +133,67 @@ const useBoard = (user) => {
   }, []);
 
   const cleanDuplicates = useCallback((gameId, title, targetColumnId = null) => {
-    saveBoard((prev) => cleanGameDuplicates(prev, gameId, title, targetColumnId));
-  }, [saveBoard]);
+    commit(cleanGameDuplicates(current(), gameId, title, targetColumnId));
+  }, [commit, current]);
 
   const addGameToBoard = useCallback((game, targetColumnId, preferredId = null) => {
     const gameId = preferredId || createClientId('game');
-    saveBoard((prev) => addGameToBoardData(prev, game, targetColumnId || prev.columnOrder[0], gameId));
+    const model = current();
+    commit(addGameToBoardData(model, game, targetColumnId || model.columnOrder[0], gameId));
     return gameId;
-  }, [saveBoard]);
+  }, [commit, current]);
 
-  const ensureGameOnBoard = useCallback((game, targetColumnId = data.columnOrder[0]) => {
+  const ensureGameOnBoard = useCallback((game, targetColumnId = null) => {
     if (!game) return null;
-    const existingId = game.id && data.games[game.id] ? game.id : findExistingGameId(data, game);
+    const model = current();
+    const existingId = game.id && model.games[game.id] ? game.id : findExistingGameId(model, game);
     if (existingId) return existingId;
-    return addGameToBoard(game, targetColumnId);
-  }, [addGameToBoard, data]);
+    return addGameToBoard(game, targetColumnId || model.columnOrder[0]);
+  }, [addGameToBoard, current]);
 
   const removeGame = useCallback((gameId) => {
-    saveBoard((prev) => removeGameFromBoardData(prev, gameId));
-  }, [saveBoard]);
+    commit(removeGameFromBoardData(current(), gameId));
+  }, [commit, current]);
 
   const moveGame = useCallback((gameId, targetColumnId) => {
-    saveBoard((prev) => moveGameOnBoardData(prev, gameId, targetColumnId));
-  }, [saveBoard]);
+    commit(moveGameOnBoardData(current(), gameId, targetColumnId));
+  }, [commit, current]);
+
+  const reorderGame = useCallback((gameId, columnId, index) => {
+    commit(reorderGameOnBoardData(current(), gameId, columnId, index));
+  }, [commit, current]);
 
   const toggleFavorite = useCallback((gameId) => {
-    saveBoard((prev) => toggleFavoriteOnBoardData(prev, gameId));
-  }, [saveBoard]);
+    commit(toggleFavoriteOnBoardData(current(), gameId));
+  }, [commit, current]);
 
   const patchGame = useCallback((gameId, fields) => {
-    saveBoard((prev) => patchGameOnBoardData(prev, gameId, fields));
-  }, [saveBoard]);
+    commit(patchGameOnBoardData(current(), gameId, fields));
+  }, [commit, current]);
 
   const setGameRating = useCallback((game, rating) => {
     const gameId = ensureGameOnBoard(game);
     if (!gameId) return null;
-    saveBoard((prev) => cleanGameDuplicates(
-      patchGameOnBoardData(prev, gameId, { rating }),
-      gameId,
-      game.title,
-      getGameColumnId(data, gameId),
-    ));
+    commit(patchGameOnBoardData(current(), gameId, { rating }));
+    const columnId = current().games[gameId]?.columnId || null;
+    commit(cleanGameDuplicates(current(), gameId, game.title, columnId));
     return gameId;
-  }, [data, ensureGameOnBoard, saveBoard]);
+  }, [commit, current, ensureGameOnBoard]);
 
   const saveColumn = useCallback((columnForm, isEditingColumn) => {
-    saveBoard((prev) => saveColumnToBoardData(prev, columnForm, isEditingColumn));
-  }, [saveBoard]);
+    commit(saveColumnToBoardData(current(), columnForm, isEditingColumn));
+  }, [commit, current]);
 
   const deleteColumn = useCallback((columnId, deleteMode, destinationColumnId) => {
-    saveBoard((prev) => deleteColumnFromBoardData(prev, columnId, deleteMode, destinationColumnId));
-  }, [saveBoard]);
+    commit(deleteColumnFromBoardData(current(), columnId, deleteMode, destinationColumnId));
+  }, [commit, current]);
 
   return {
     data,
     dataRef,
     isDataLoading: user ? loadedUserId !== user.uid : false,
     saveStatus,
-    saveBoard,
+    schemaVersion: model?.schemaVersion ?? null,
     performSmartMigration,
     boardActions: {
       addGameToBoard,
@@ -139,6 +203,7 @@ const useBoard = (user) => {
       moveGame,
       patchGame,
       removeGame,
+      reorderGame,
       saveColumn,
       setGameRating,
       toggleFavorite,

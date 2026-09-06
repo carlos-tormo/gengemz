@@ -73,7 +73,22 @@ service cloud.firestore {
         (tokens.size() <= 1 || validString(tokens[tokens.size() - 1], 20));
     }
 
-    function validBoard(data) {
+    // Board schema 2: the board document only holds the columns; games live in
+    // users/{uid}/games/{gameId} (see validGame*).
+    function validBoardV2(data) {
+      return data.keys().hasOnly(["columns", "columnOrder", "schemaVersion", "updatedAt"]) &&
+        data.schemaVersion == 2 &&
+        data.columns is map &&
+        data.columnOrder is list &&
+        data.columns.keys().size() <= 5 &&
+        data.columnOrder.size() <= 5 &&
+        data.updatedAt == request.time;
+    }
+
+    // TRANSITIONAL (remove in S3's follow-up): schema 1 boards, games embedded
+    // in the document. Accepted only while the stored board is not yet on
+    // schema 2, so a migrated board can never be downgraded.
+    function validLegacyBoard(data) {
       return data.keys().hasOnly(["games", "columns", "columnOrder"]) &&
         data.games is map &&
         data.columns is map &&
@@ -81,6 +96,77 @@ service cloud.firestore {
         data.games.keys().size() <= 500 &&
         data.columns.keys().size() <= 5 &&
         data.columnOrder.size() <= 5;
+    }
+
+    function storedBoardIsV2() {
+      return resource != null && resource.data.get("schemaVersion", 1) == 2;
+    }
+
+    function validBoard(data) {
+      return validBoardV2(data) ||
+        (!storedBoardIsV2() && validLegacyBoard(data));
+    }
+
+    function validOptionalInt(data, field, min, max) {
+      return !(field in data) || (data[field] is int && data[field] >= min && data[field] <= max);
+    }
+
+    function validOptionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function validOptionalTimestamp(data, field) {
+      return !(field in data) || data[field] is timestamp;
+    }
+
+    // Per-game document (board schema 2).
+    function validGameShape(gameId, data) {
+      return data.keys().hasOnly([
+          "id",
+          "title",
+          "cover",
+          "coverIndex",
+          "rawgId",
+          "rawgSlug",
+          "externalSource",
+          "platform",
+          "genre",
+          "year",
+          "columnId",
+          "position",
+          "rating",
+          "isFavorite",
+          "addedAt",
+          "updatedAt",
+          "completedAt"
+        ]) &&
+        data.id == gameId &&
+        validString(data.title, 200) &&
+        validString(data.columnId, 40) &&
+        data.position is number &&
+        data.rating is int && data.rating >= 0 && data.rating <= 10 &&
+        data.isFavorite is bool &&
+        validOptionalString(data, "cover", 1000) &&
+        validOptionalInt(data, "coverIndex", 0, 100) &&
+        validOptionalString(data, "rawgId", 40) &&
+        validOptionalString(data, "rawgSlug", 160) &&
+        validOptionalString(data, "externalSource", 40) &&
+        validOptionalString(data, "platform", 160) &&
+        validOptionalString(data, "genre", 80) &&
+        validOptionalString(data, "year", 10) &&
+        validOptionalTimestamp(data, "completedAt") &&
+        data.addedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function validGameCreate(gameId, data) {
+      return validGameShape(gameId, data) &&
+        data.addedAt == request.time;
+    }
+
+    function validGameUpdate(gameId, before, after) {
+      return validGameShape(gameId, after) &&
+        after.addedAt == before.addedAt;
     }
 
     function validSettings(data) {
@@ -298,6 +384,15 @@ service cloud.firestore {
         allow create, update: if isOwner(userId) &&
           validUserDataDoc(docId, request.resource.data);
         allow delete: if isOwner(userId) && docId in ["board", "settings"];
+      }
+
+      match /users/{userId}/games/{gameId} {
+        allow read: if isOwner(userId) || canViewBoard(appId, userId);
+        allow create: if isOwner(userId) &&
+          validGameCreate(gameId, request.resource.data);
+        allow update: if isOwner(userId) &&
+          validGameUpdate(gameId, resource.data, request.resource.data);
+        allow delete: if isOwner(userId);
       }
 
       match /public_profiles/{profileId} {

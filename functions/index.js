@@ -12,6 +12,8 @@ const PROJECT_ID = process.env.GCLOUD_PROJECT || "";
 const DEFAULT_ORIGINS = [
   PROJECT_ID && `https://${PROJECT_ID}.web.app`,
   PROJECT_ID && `https://${PROJECT_ID}.firebaseapp.com`,
+  "https://gengemz.com",
+  "https://www.gengemz.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:5002",

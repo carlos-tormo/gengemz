@@ -9,7 +9,7 @@ import {
   initializeTestEnvironment, assertSucceeds, assertFails,
 } from '@firebase/rules-unit-testing';
 import {
-  doc, getDoc, setDoc, deleteDoc, serverTimestamp, writeBatch,
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 
 const APP = 'gengemz-prod';
@@ -21,14 +21,20 @@ const env = await initializeTestEnvironment({
 const P = (db, ...seg) => doc(db, 'artifacts', APP, ...seg);
 const boardRef = (db, uid) => P(db, 'users', uid, 'data', 'board');
 const rel = (db, owner, type, other) => P(db, 'relationships', owner, type, other);
+const gameRef = (db, uid, gameId) => P(db, 'users', uid, 'games', gameId);
+const gamesCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'games');
 
 // Seed: alice public, bob invite_only, carol private. Each has a board.
 await env.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   for (const [uid, privacy] of [['alice', 'public'], ['bob', 'invite_only'], ['carol', 'private']]) {
     await setDoc(P(db, 'public_profiles', uid), { uid, privacy, displayName: uid });
-    await setDoc(boardRef(db, uid), { games: {}, columns: {}, columnOrder: [] });
+    await setDoc(boardRef(db, uid), { columns: { backlog: { id: 'backlog', title: 'To Play', icon: 'clock' } }, columnOrder: ['backlog'], schemaVersion: 2, updatedAt: new Date() });
+    await setDoc(gameRef(db, uid, 'g1'), { id: 'g1', title: 'Seed', columnId: 'backlog', position: 0, rating: 0, isFavorite: false, addedAt: new Date(), updatedAt: new Date() });
   }
+  // legacy (schema 1) board for zoe, used by the transitional board tests
+  await setDoc(P(db, 'public_profiles', 'zoe'), { uid: 'zoe', privacy: 'private', displayName: 'zoe' });
+  await setDoc(boardRef(db, 'zoe'), { games: {}, columns: {}, columnOrder: [] });
   // alice has blocked mallory
   await setDoc(rel(db, 'alice', 'blocked', 'mallory'), { uid: 'mallory', blockedAt: new Date() });
 });
@@ -107,6 +113,69 @@ await t('unblocked stranger can follow public alice', () => assertSucceeds(setDo
   uid: 'alice', displayName: 'alice', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
 await t('unblocked stranger can add self to alice followers', () => assertSucceeds(setDoc(rel(dave, 'alice', 'followers', 'dave'), {
   uid: 'dave', displayName: 'dave', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
+
+console.log('Board document (schema 2)');
+const alice = as('alice');
+const v2Board = () => ({ columns: { backlog: { id: 'backlog', title: 'To Play', icon: 'clock' } }, columnOrder: ['backlog'], schemaVersion: 2, updatedAt: serverTimestamp() });
+await t('owner writes v2 board', () => assertSucceeds(setDoc(boardRef(alice, 'alice'), v2Board())));
+await t('v2 board rejects games key', () => assertFails(setDoc(boardRef(alice, 'alice'), { ...v2Board(), games: {} })));
+await t('v2 board rejects missing updatedAt', () => assertFails(setDoc(boardRef(alice, 'alice'), { ...v2Board(), updatedAt: new Date(2020, 1, 1) })));
+await t('v2 board rejects wrong schemaVersion', () => assertFails(setDoc(boardRef(alice, 'alice'), { ...v2Board(), schemaVersion: 3 })));
+await t('v2 board cannot be downgraded to legacy shape', () => assertFails(setDoc(boardRef(alice, 'alice'), { games: {}, columns: {}, columnOrder: [] })));
+await t('legacy board still accepts legacy shape (until S3)', () => assertSucceeds(setDoc(boardRef(as('zoe'), 'zoe'), { games: {}, columns: {}, columnOrder: [] })));
+await t('legacy board can upgrade to v2', () => assertSucceeds(setDoc(boardRef(as('zoe'), 'zoe'), v2Board())));
+await t('non-owner cannot write board', () => assertFails(setDoc(boardRef(dave, 'alice'), v2Board())));
+
+console.log('Game documents: owner CRUD');
+const game = (id, extra = {}) => ({
+  id, title: 'Hollow Knight', cover: 'https://x/y.jpg', coverIndex: 0, rawgId: '9767', rawgSlug: 'hollow-knight',
+  externalSource: 'rawg', platform: 'PC', genre: 'Indie', year: '2017', columnId: 'backlog', position: 0.5,
+  rating: 0, isFavorite: false, addedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+});
+await t('owner creates game', () => assertSucceeds(setDoc(gameRef(alice, 'alice', 'hk'), game('hk'))));
+await t('owner creates game via batch with board doc', async () => {
+  const b = writeBatch(alice);
+  b.set(gameRef(alice, 'alice', 'hk2'), game('hk2', { position: 1 }));
+  b.set(boardRef(alice, 'alice'), v2Board());
+  await assertSucceeds(b.commit());
+});
+await t('create rejects unknown key', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad1'), game('bad1', { itemIds: [] }))));
+await t('create rejects id mismatch', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad2'), game('other'))));
+await t('create rejects rating out of range', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad3'), game('bad3', { rating: 11 }))));
+await t('create rejects non-integer rating', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad4'), game('bad4', { rating: 4.5 }))));
+await t('create rejects missing title', () => { const { title: _t, ...noTitle } = game('bad5'); return assertFails(setDoc(gameRef(alice, 'alice', 'bad5'), noTitle)); });
+await t('create rejects long title', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad6'), game('bad6', { title: 'x'.repeat(201) }))));
+await t('create rejects long columnId', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad7'), game('bad7', { columnId: 'c'.repeat(41) }))));
+await t('create rejects long cover', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad8'), game('bad8', { cover: 'h'.repeat(1001) }))));
+await t('create rejects client updatedAt', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad9'), game('bad9', { updatedAt: new Date() }))));
+await t('create rejects client addedAt', () => assertFails(setDoc(gameRef(alice, 'alice', 'bad10'), game('bad10', { addedAt: new Date(2020, 1, 1) }))));
+await t('owner patches rating/favourite (merge)', () => assertSucceeds(setDoc(gameRef(alice, 'alice', 'hk'), { rating: 9, isFavorite: true, updatedAt: serverTimestamp() }, { merge: true })));
+await t('owner moves game (merge columnId/position)', () => assertSucceeds(setDoc(gameRef(alice, 'alice', 'hk'), { columnId: 'playing', position: 2.25, updatedAt: serverTimestamp() }, { merge: true })));
+await t('owner sets completedAt', () => assertSucceeds(setDoc(gameRef(alice, 'alice', 'hk'), { completedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })));
+await t('update without updatedAt is rejected', () => assertFails(setDoc(gameRef(alice, 'alice', 'hk'), { rating: 3 }, { merge: true })));
+await t('update cannot change addedAt', () => assertFails(setDoc(gameRef(alice, 'alice', 'hk'), { addedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })));
+await t('owner reads own game', () => assertSucceeds(getDoc(gameRef(alice, 'alice', 'hk'))));
+await t('owner lists own games', () => assertSucceeds(getDocs(gamesCol(alice, 'alice'))));
+await t('owner deletes game', () => assertSucceeds(deleteDoc(gameRef(alice, 'alice', 'hk2'))));
+
+console.log('Game documents: other users');
+await t('non-owner cannot create game', () => assertFails(setDoc(gameRef(dave, 'alice', 'evil'), game('evil'))));
+await t('non-owner cannot update game', () => assertFails(setDoc(gameRef(dave, 'alice', 'hk'), { rating: 1, updatedAt: serverTimestamp() }, { merge: true })));
+await t('non-owner cannot delete game', () => assertFails(deleteDoc(gameRef(dave, 'alice', 'hk'))));
+await t('unauthenticated cannot read public user game', () => assertFails(getDoc(gameRef(anon, 'alice', 'g1'))));
+await t('stranger reads public user game', () => assertSucceeds(getDoc(gameRef(dave, 'alice', 'g1'))));
+await t('stranger lists public user games', () => assertSucceeds(getDocs(gamesCol(dave, 'alice'))));
+await t('stranger cannot read invite_only user game (not a follower)', () => assertFails(getDoc(gameRef(as('frank'), 'bob', 'g1'))));
+await t('stranger cannot list invite_only user games', () => assertFails(getDocs(gamesCol(as('frank'), 'bob'))));
+await t('stranger cannot read private user game', () => assertFails(getDoc(gameRef(dave, 'carol', 'g1'))));
+await t('blocked user cannot read public user game', () => assertFails(getDoc(gameRef(mallory, 'alice', 'g1'))));
+await t('blocked user cannot list public user games', () => assertFails(getDocs(gamesCol(mallory, 'alice'))));
+await t('accepted follower reads invite_only user game', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(rel(ctx.firestore(), 'bob', 'followers', 'heidi'), { uid: 'heidi', status: 'following', updatedAt: new Date() });
+  });
+  await assertSucceeds(getDoc(gameRef(as('heidi'), 'bob', 'g1')));
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();

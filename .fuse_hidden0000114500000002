@@ -1,0 +1,44 @@
+[debug] [2026-09-05T23:39:16.073Z] ----------------------------------------------------------------------
+[debug] [2026-09-05T23:39:16.074Z] Command:       /usr/bin/node /sessions/rcw-01gny2edv5iqqzgcezdrpvcv/mnt/ggz/gengemz/tests/node_modules/.bin/firebase emulators:exec --only firestore --project rules-test node tests/firestore.rules.test.mjs
+[debug] [2026-09-05T23:39:16.075Z] CLI Version:   14.27.0
+[debug] [2026-09-05T23:39:16.075Z] Platform:      linux
+[debug] [2026-09-05T23:39:16.075Z] Node Version:  v22.23.2
+[debug] [2026-09-05T23:39:16.075Z] Time:          Sat Sep 05 2026 23:39:16 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-09-05T23:39:16.075Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-09-05T23:39:16.077Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-09-05T23:39:16.263Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-09-05T23:39:16.309Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 403
+[debug] [2026-09-05T23:39:16.309Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json "Connection blocked by network allowlist"
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-09-05T23:39:16.310Z] Failed to fetch MOTD FirebaseError: Unable to parse JSON: SyntaxError: Unexpected token 'C', "Connection"... is not valid JSON
+[debug] Failed to authenticate, have you run firebase login?
+[warn] ⚠  emulators: You are not currently authenticated so some features may not work correctly. Please run firebase login to authenticate the CLI. 
+[debug] [2026-09-05T23:39:16.441Z] openjdk version "11.0.32" 2026-07-21
+
+[debug] [2026-09-05T23:39:16.441Z] OpenJDK Runtime Environment (build 11.0.32+9-post-1ubuntu1-22.04-Ubuntu)
+OpenJDK 64-Bit Server VM (build 11.0.32+9-post-1ubuntu1-22.04-Ubuntu, mixed mode)
+
+[debug] [2026-09-05T23:39:16.452Z] Parsed Java major version: 11
+[warn] ⬢  emulators: firebase-tools will drop support for Java version < 21 soon in firebase-tools@15. Please install a JDK at version 21 or above to get a compatible runtime. 
+[info] i  emulators: Starting emulators: firestore {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: firestore"}}
+[debug] [2026-09-05T23:39:16.458Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-09-05T23:39:16.459Z] [firestore] Firestore Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-09-05T23:39:16.459Z] [firestore.websocket] websocket server for firestore only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-09-05T23:39:16.459Z] assigned listening specs for emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8080}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-09-05T23:39:16.461Z] Emulator locator file path: /sessions/rcw-01gny2edv5iqqzgcezdrpvcv/tmp/hub-rules-test.json
+[debug] [2026-09-05T23:39:16.461Z] [hub] writing locator at /sessions/rcw-01gny2edv5iqqzgcezdrpvcv/tmp/hub-rules-test.json
+[debug] [2026-09-05T23:39:16.466Z] Ignoring unsupported arg: auto_download {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: auto_download"}}
+[debug] [2026-09-05T23:39:16.466Z] Ignoring unsupported arg: single_project_mode_error {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: single_project_mode_error"}}
+[debug] [2026-09-05T23:39:16.466Z] Starting Firestore Emulator with command {"binary":"java","args":["-Dgoogle.cloud_firestore.debug_log_level=FINE","-Duser.language=en","-jar","/sessions/rcw-01gny2edv5iqqzgcezdrpvcv/.cache/firebase/emulators/cloud-firestore-emulator-v1.19.8.jar","--host","127.0.0.1","--port",8080,"--websocket_port",9150,"--project_id","rules-test","--rules","/sessions/rcw-01gny2edv5iqqzgcezdrpvcv/mnt/ggz/gengemz/firestore.rules","--single_project_mode",true],"optionalArgs":["port","webchannel_port","host","rules","websocket_port","functions_emulator","seed_from_export","project_id","single_project_mode"],"joinArgs":false,"shell":false,"port":8080} {"metadata":{"emulator":{"name":"firestore"},"message":"Starting Firestore Emulator with command {\"binary\":\"java\",\"args\":[\"-Dgoogle.cloud_firestore.debug_log_level=FINE\",\"-Duser.language=en\",\"-jar\",\"/sessions/rcw-01gny2edv5iqqzgcezdrpvcv/.cache/firebase/emulators/cloud-firestore-emulator-v1.19.8.jar\",\"--host\",\"127.0.0.1\",\"--port\",8080,\"--websocket_port\",9150,\"--project_id\",\"rules-test\",\"--rules\",\"/sessions/rcw-01gny2edv5iqqzgcezdrpvcv/mnt/ggz/gengemz/firestore.rules\",\"--single_project_mode\",true],\"optionalArgs\":[\"port\",\"webchannel_port\",\"host\",\"rules\",\"websocket_port\",\"functions_emulator\",\"seed_from_export\",\"project_id\",\"single_project_mode\"],\"joinArgs\":false,\"shell\":false,\"port\":8080}"}}
+[info] i  firestore: Firestore Emulator logging to firestore-debug.log {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator logging to firestore-debug.log"}}
+[debug] [2026-09-05T23:39:16.628Z] Error: LinkageError occurred while loading main class com.google.cloud.datastore.emulator.firestore.CloudFirestore
+	java.lang.UnsupportedClassVersionError: com/google/cloud/datastore/emulator/firestore/CloudFirestore has been compiled by a more recent version of the Java Runtime (class file version 65.0), this version of the Java Runtime only recognizes class file versions up to 55.0
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Error: LinkageError occurred while loading main class com.google.cloud.datastore.emulator.firestore.CloudFirestore\n\tjava.lang.UnsupportedClassVersionError: com/google/cloud/datastore/emulator/firestore/CloudFirestore has been compiled by a more recent version of the Java Runtime (class file version 65.0), this version of the Java Runtime only recognizes class file versions up to 55.0\n"}}
+[warn] ⚠  firestore: Unsupported java version, make sure java --version reports 1.8 or higher. {"metadata":{"emulator":{"name":"firestore"},"message":"Unsupported java version, make sure java --version reports 1.8 or higher."}}
+[warn] ⚠  firestore: Fatal error occurred: 
+   Firestore Emulator has exited with code: 1, 
+   stopping all running emulators {"metadata":{"emulator":{"name":"firestore"},"message":"Fatal error occurred: \n   Firestore Emulator has exited with code: 1, \n   stopping all running emulators"}}
+[info] i  firestore: Stopping Firestore Emulator {"metadata":{"emulator":{"name":"firestore"},"message":"Stopping Firestore Emulator"}}
+[info] i  hub: Stopping emulator hub {"metadata":{"emulator":{"name":"hub"},"message":"Stopping emulator hub"}}
+[debug] [2026-09-05T23:39:16.633Z] Emulator locator file path: /sessions/rcw-01gny2edv5iqqzgcezdrpvcv/tmp/hub-rules-test.json

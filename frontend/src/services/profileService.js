@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { APP_ID } from '../config/constants';
 import { db } from '../config/firebase';
+import { loadBoardView } from './boardService';
 
 const userDataDoc = (uid, docId) => doc(db, 'artifacts', APP_ID, 'users', uid, 'data', docId);
 const publicProfileDoc = (uid) => doc(db, 'artifacts', APP_ID, 'public_profiles', uid);
@@ -151,7 +152,6 @@ export const getPublicProfile = async (uid) => {
   return snapshot.exists() ? { uid, ...snapshot.data() } : null;
 };
 
-export const loadProfileBoard = async (uid) => {
-  const snapshot = await getDoc(userDataDoc(uid, 'board'));
-  return snapshot.exists() ? snapshot.data() : null;
-};
+// Returns the board in the pre-v2 view shape ({ columns[id].itemIds, games })
+// whichever schema the owner is on.
+export const loadProfileBoard = (uid) => loadBoardView(uid);
