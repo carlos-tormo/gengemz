@@ -5,7 +5,7 @@ import {
   LogIn, LogOut, Loader2, Check, Edit2, Search, Image as ImageIcon,
   ArrowRight, Save, WifiOff, LayoutGrid, List,
   Pencil, Lock, Unlock, Calendar, Heart, Star,
-  Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun, Menu
+  Settings, Users, UserPlus, Shield, Wrench, Database, Moon, Sun, Menu, Rss
 } from 'lucide-react';
 // Firebase imports
 import { auth } from './config/firebase';
@@ -31,6 +31,7 @@ import SearchDropdown from './components/SearchDropdown';
 import BoardPage from './components/BoardPage';
 import ProfilePage from './components/ProfilePage';
 import ConnectionsPage from './components/ConnectionsPage';
+import FeedPage from './components/FeedPage';
 import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
 import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
 
@@ -42,14 +43,16 @@ import usePlaylists from './hooks/usePlaylists';
 import useUserProfile from './hooks/useUserProfile';
 import useBoard from './hooks/useBoard';
 import useGameSearch from './hooks/useGameSearch';
+import useFeed from './hooks/useFeed';
 import { browseGames } from './services/rawgService';
 import { findPlaylistForGame as findPlaylistForGameInList } from './services/playlistService';
 import { createBoardGameFromRaw } from './services/boardService';
+import { boardGameFromEvent } from './services/feedService';
 
 // Utilities
 import { 
   getUniquePlatforms, getHiddenGamesCount, getFavoriteGames, 
-  createClientId, findExistingGameId, getGameColumnId, isGameOnBoard, sameGameIdentity
+  createClientId, findExistingGameId, getGameColumnId, getGameIdentities, isGameOnBoard, sameGameIdentity
 } from './utils/gameUtils';
 
 // --- Main App Component ---
@@ -60,7 +63,7 @@ export default function App() {
   
   const { data, dataRef, isDataLoading, saveStatus, performSmartMigration, boardActions } = useBoard(user);
   const {
-    relationships, friends, isLoading: areRelationshipsLoading,
+    relationships, friends, feedSources, isLoading: areRelationshipsLoading,
     follow, unfollow, block, unblock, acceptRequest, declineRequest,
   } = useRelationships(user);
   const {
@@ -97,6 +100,16 @@ export default function App() {
   const openPlaylist = (id) => navigate(id ? `/playlists/${id}` : '/playlists');
   const closePlaylists = () => navigate('/');
   const openConnections = () => navigate('/connections');
+  const isFeedPage = pathname === '/feed';
+
+  /*
+   * Activity feed (S7). The session only exists while /feed is on screen — a
+   * feed page is one query per followed account (decision 11 forbids the
+   * collection group query), so leaving it running in the background would
+   * charge the board for reads nobody looks at.
+   */
+  const [includeOwnActivity, setIncludeOwnActivity] = useState(false);
+  const feed = useFeed(user, feedSources, { includeOwn: includeOwnActivity, enabled: isFeedPage });
   
   // View State
   const [activePlatformFilter, setActivePlatformFilter] = useState('All');
@@ -689,6 +702,67 @@ export default function App() {
     setIsColumnModalOpen(false); 
   };
 
+  /*
+   * Default landing (S7): a signed-in account with something to read lands on
+   * the feed instead of the board — once per session, and only on a bare "/",
+   * so "Back to Board" is not bounced straight back here and a deep link is
+   * never overridden.
+   *
+   * The condition is "at least one accepted follow", not "at least one friend"
+   * as the task text said: the feed's authors are `feedSources`, so someone who
+   * follows twenty public profiles without a follow back has a full feed, and
+   * sending them to an empty board would be the wrong default.
+   */
+  const landedRef = useRef(null);
+  const openedAtRef = useRef(Date.now());
+  useEffect(() => {
+    // Signing out releases the latch, so signing back in lands on the feed again.
+    if (!user) { landedRef.current = null; return; }
+    if (user.isAnonymous || areRelationshipsLoading) return;
+    if (landedRef.current === user.uid) return;
+    landedRef.current = user.uid;
+    // The four relationship listeners can take seconds on a cold or offline
+    // start. Past that, the user has settled on the board and navigating out
+    // from under them is worse than not defaulting at all.
+    if (Date.now() - openedAtRef.current > 8000) return;
+    if (pathname !== '/' || locationSearch) return;
+    if (!feedSources.length) return;
+    navigate('/feed', { replace: true });
+  }, [user, areRelationshipsLoading, feedSources, pathname, locationSearch, navigate]);
+
+  /*
+   * "Add to my backlog" on a feed card. `ensureGameOnBoard` rather than
+   * `addGameToBoard`: the builders treat an add of a game you already own as a
+   * *move*, and a feed card must never drag your own game out of Victory Road
+   * and into the backlog.
+   */
+  const handleAddGameFromFeed = (event) => {
+    if (!user || user.isAnonymous) { alert('Sign in to add games to your board.'); return false; }
+    // `data` is INITIAL_DATA until the board listener delivers, so acting now
+    // would dedupe against an empty board (a second copy of a game you already
+    // own) and write it into `backlog`, a column this account may not have.
+    if (isDataLoading) return false;
+    const game = boardGameFromEvent(event);
+    if (!game) return false;
+    boardActions.ensureGameOnBoard(game, data.columnOrder[0]);
+    return true;
+  };
+
+  /*
+   * "Already on my board?" for feed cards. Indexed once per board change:
+   * `isGameOnBoard` rebuilds the identity list of every board game, and the
+   * feed asks it for every game of every card on every render.
+   */
+  const boardGameIdentities = useMemo(() => {
+    const identities = new Set();
+    Object.values(data.games || {}).forEach((game) => {
+      getGameIdentities(game).forEach(({ type, value }) => identities.add(`${type}:${value}`));
+    });
+    return identities;
+  }, [data.games]);
+  const isFeedGameOnBoard = (game) => !!game && getGameIdentities(game)
+    .some(({ type, value }) => boardGameIdentities.has(`${type}:${value}`));
+
   const platforms = getUniquePlatforms(data);
   const showLanding = !isAuthLoading && !isDataLoading && user?.isAnonymous && (!data.games || Object.keys(data.games).length === 0);
   const boardElement = isDataLoading ? (
@@ -798,6 +872,15 @@ export default function App() {
             >
               <Database size={18} />
             </button>
+            {user && !user.isAnonymous && (
+              <button
+                onClick={() => navigate('/feed')}
+                className={`p-2 rounded-full bg-[var(--panel)] border border-[var(--border)] hover:border-[var(--accent)] ${isFeedPage ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}
+                aria-label="Feed"
+              >
+                <Rss size={18} />
+              </button>
+            )}
             <button
               onClick={() => { setIsSettingsModalOpen(true); }}
               className="rounded-full border border-[var(--border)] overflow-hidden w-10 h-10 flex items-center justify-center bg-[var(--panel)]"
@@ -859,6 +942,15 @@ export default function App() {
                  <List size={18} />
                </button>
              )}
+            {!showLanding && !isDataLoading && user && !user.isAnonymous && (
+              <button
+                onClick={() => navigate('/feed')}
+                className={`p-2 rounded-full transition-colors ${isFeedPage ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                title="Feed"
+              >
+                <Rss size={18} />
+              </button>
+            )}
             {!showLanding && !isDataLoading && !isFavoritesView && (
               <button
                 onClick={openPlaylists}
@@ -1055,6 +1147,23 @@ export default function App() {
                 onBlockAction={handleBlockAction}
                 loadProfileBoardModel={loadProfileBoardModel}
                 subscribeToUserGames={subscribeToUserGames}
+              />
+            }
+          />
+          <Route
+            path="/feed"
+            element={
+              <FeedPage
+                user={user}
+                isAuthLoading={isAuthLoading}
+                areRelationshipsLoading={areRelationshipsLoading}
+                feed={feed}
+                includeOwn={includeOwnActivity}
+                onToggleIncludeOwn={setIncludeOwnActivity}
+                onAddGame={handleAddGameFromFeed}
+                isGameOnBoard={isFeedGameOnBoard}
+                isBoardReady={!isDataLoading}
+                onCopyProfileLink={copyOwnProfileLink}
               />
             }
           />

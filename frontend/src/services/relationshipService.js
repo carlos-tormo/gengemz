@@ -65,6 +65,27 @@ export const computeFriends = ({ following = {}, followers = {}, blocked = {} } 
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
 );
 
+/*
+ * Whose activity the feed (S7) may read: everyone I follow with an accepted
+ * status, minus anyone I have blocked. Not `friends` — the rule that gates
+ * activity is `canViewActivity`, which asks whether I follow *them*, so a
+ * public profile I follow one-way is a legitimate feed source and waiting for
+ * a follow back would empty the feed for no reason.
+ *
+ * A still-`pending` request to an invite-only profile is excluded: the read
+ * would be denied, and the reader would drop the author anyway.
+ *
+ * Pure, and derived from the same two listeners `computeFriends` uses, so an
+ * unfollow or a block empties that author out of the feed on the next render
+ * without a re-query.
+ */
+export const computeFeedSources = ({ following = {}, blocked = {} } = {}) => (
+  Object.values(following)
+    .filter((entry) => entry?.uid && entry.status === 'following' && !blocked[entry.uid])
+    .map((entry) => entry.uid)
+    .sort()
+);
+
 export const followProfile = async (user, profile) => {
   if (!user || !profile?.uid || profile.uid === user.uid) {
     return { ok: false, error: 'invalid' };

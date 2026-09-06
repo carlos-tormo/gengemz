@@ -10,7 +10,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   collection, collectionGroup, doc, getDoc, getDocs, limit, orderBy, query,
-  setDoc, deleteDoc, serverTimestamp, where, writeBatch,
+  setDoc, deleteDoc, serverTimestamp, startAfter, where, writeBatch,
 } from 'firebase/firestore';
 
 const APP = 'gengemz-prod';
@@ -260,6 +260,17 @@ await t('a feed page of a public user is readable', () => assertSucceeds(getDocs
 await t('a feed page of a private user is denied', () => assertFails(getDocs(feedPage(dave, 'carol'))));
 await t('a feed page of an invite_only user you do not follow is denied', () => assertFails(getDocs(feedPage(as('frank'), 'bob'))));
 await t('a blocked user cannot page a public user', () => assertFails(getDocs(feedPage(mallory, 'alice'))));
+
+// S7 pages with the last DocumentSnapshot, not its createdAt: several events
+// of one game write share a server timestamp, so a value cursor would skip
+// their siblings. The cursor must not change how the query is authorised.
+await t('a cursored feed page is still readable', async () => {
+  const first = await getDocs(feedPage(dave, 'alice'));
+  const cursor = first.docs[first.docs.length - 1];
+  return assertSucceeds(getDocs(query(
+    activityCol(dave, 'alice'), orderBy('createdAt', 'desc'), startAfter(cursor), limit(30),
+  )));
+});
 
 const groupFor = (db, uid) => query(collectionGroup(db, 'activity'), where('uid', '==', uid));
 await t('collection group query is denied even for a followed user', () => assertFails(getDocs(groupFor(as('heidi'), 'bob'))));

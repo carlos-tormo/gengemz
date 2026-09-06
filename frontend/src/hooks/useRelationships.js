@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   acceptFollowRequest,
   blockProfile,
+  computeFeedSources,
   computeFriends,
   declineFollowRequest,
   followProfile,
@@ -66,9 +67,14 @@ const useRelationships = (user) => {
   // intersection of the two listeners already open.
   const friends = useMemo(() => computeFriends(relationships), [relationships]);
 
+  // The feed's authors (S7): accepted follows, not the mutual intersection —
+  // `canViewActivity` asks whether I follow them, not whether they follow back.
+  const feedSources = useMemo(() => computeFeedSources(relationships), [relationships]);
+
   return {
     relationships,
     friends,
+    feedSources,
     // Nothing to load without a user, so this stays false rather than
     // promising a resolution that never comes.
     isLoading: !!user && (!isCurrent || TYPES.some((type) => !state.delivered[type])),
