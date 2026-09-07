@@ -1,9 +1,22 @@
 # QA pendiente entre `main` y producción
 
-**Estado:** `main` y producción están sincronizados en `firestore.rules` y `hosting` a 2026-09-07
-(deploy de S9, PR #7, `firebase deploy --only firestore:rules,hosting`). El agujero que S9 cierra
-(sesión anónima siguiendo, pidiendo seguir, bloqueando o publicando playlists públicas) ya no existe
-en producción.
+**Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
+2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #13 / issue #8). Incluye
+además el `chore: link project board` (8d572b2) que se había quedado sin subir a `origin/main` en
+una sesión anterior — `/deploy` lo detectó al fallar el fast-forward, lo reconcilió con un merge de
+`origin/main` en local y lo empujó junto con el merge de #13. Smoke check tras el deploy:
+`https://gengemztest-9582e.web.app` responde 200 y, con la sesión de navegador ya autenticada, el
+onboarding paginado ("Your Quest Log", Quest 1 de 4) se abre solo, confirmando que el feature de
+#8 está vivo en producción — no se interactuó más con ese modal para no escribir sobre una cuenta
+real ajena a la verificación.
+
+## Issue #8 — onboarding quest shell (PR #13)
+
+QA funcional con 7/7 criterios verificados (comentario:
+https://github.com/carlos-tormo/gengemz/pull/13#issuecomment-5570194160). El criterio de escritura
+del flag (`settings.questOnboardingCompleted`) reveló un fallo real de `firestore.rules`
+(`validSettings()` no admitía el campo nuevo) que se arregló en el mismo PR, con test de reglas.
+Desplegado hoy junto con el resto — sin desfase pendiente para este issue.
 
 **Deploy parcial, no `firebase deploy` completo**: el primer intento (`firebase deploy` sin
 `--only`) falló en el paso de functions con `Error: User code failed to load. Cannot determine
@@ -83,3 +96,13 @@ propio deploy avisó: `package.json indicates an outdated version of firebase-fu
   real. Vale la pena decidir si se añade (`import.meta.env.DEV` + flag) o si
   se acepta que el QA funcional siempre corre contra cuentas de prueba en el
   proyecto real.
+- **Vehículo alternativo probado en el QA de #8** para los criterios que dependen de
+  Firestore/Auth sin ese wiring: un script Node (`node --import <loader-esm>`) que reemplaza, vía
+  un hook de módulos (mismo patrón que ya usa `tests/loader.stubs.mjs` para las Cloud Functions),
+  la resolución de `frontend/src/config/firebase.js` por una versión conectada a los emuladores
+  reales (`connectFirestoreEmulator`/`connectAuthEmulator`), e importa y ejecuta las funciones
+  reales de `frontend/src/services/*.js` contra ellos, con usuarios de prueba creados en el propio
+  emulador. No sustituye el click-testing de UI, pero cubre gating/escritura/persistencia sin
+  tocar el proyecto real ni reimplementar la lógica de negocio. El script no se comiteó (vivió en
+  `/tmp` durante el QA); si esto se repite a menudo, vale la pena convertirlo en un fixture
+  reutilizable bajo `tests/` en vez de rehacerlo cada vez.
