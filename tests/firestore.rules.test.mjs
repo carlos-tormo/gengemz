@@ -350,6 +350,13 @@ await t('anonymous cannot create a public playlist', () => assertFails(
 await t('anonymous can create a private playlist', () => assertSucceeds(
   setDoc(playlistRef(ivy, 'pl-ivy-private'), { ...publicPlaylist('ivy'), privacy: 'private' }),
 ));
+await t('anonymous cannot flip a private playlist to public via update', () => assertFails(
+  setDoc(playlistRef(ivy, 'pl-ivy-private'), { privacy: 'public', updatedAt: serverTimestamp() }, { merge: true }),
+));
+await t('real user can create private and then flip it to public via update', async () => {
+  await assertSucceeds(setDoc(playlistRef(dave, 'pl-dave-private'), { ...publicPlaylist('dave'), privacy: 'private' }));
+  await assertSucceeds(setDoc(playlistRef(dave, 'pl-dave-private'), { privacy: 'public', updatedAt: serverTimestamp() }, { merge: true }));
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();

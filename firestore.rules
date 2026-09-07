@@ -301,6 +301,7 @@ service cloud.firestore {
         before.ownerUid == request.auth.uid &&
         after.ownerUid == before.ownerUid &&
         after.createdAt == before.createdAt &&
+        (after.privacy != "public" || isRealUser()) &&
         validString(after.title, 120) &&
         validOptionalString(after, "description", 1000) &&
         validOptionalString(after, "ownerName", 80) &&
