@@ -4,13 +4,13 @@ import Modal from './Modal';
 import QuestGameSearchStep from './QuestGameSearchStep';
 import { playingColumnId, completionColumnId } from '../services/boardService';
 
-// Placeholder content — issues #11-#12 replace quests 3-4's title/description/interaction.
-// Quests 1 (#9) and 2 (#10) are real, rendered via QuestGameSearchStep below. This shell only
-// owns pagination, progress, skip and the completion flag.
+// Placeholder content — issue #12 replaces quest 4's title/description/interaction.
+// Quests 1 (#9), 2 (#10) and 3 (#11) are real, rendered via QuestGameSearchStep below. This shell
+// only owns pagination, progress, skip and the completion flag.
 const QUESTS = [
   { title: '¿A qué estás jugando?' },
   { title: '¿Has completado algo últimamente?' },
-  { title: 'Quest 3', description: 'Coming soon.' },
+  { title: '¿Algo que quieras jugar en el futuro?' },
   { title: 'Quest 4', description: 'Coming soon.' },
 ];
 
@@ -75,6 +75,16 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData }) => {
               title={currentQuest.title}
               description={'"Victory Road" is where finished games go — drop one there to mark it complete and add it to your progression.'}
               targetColumnId={completionColumnId(boardData) || boardData?.columnOrder?.[0]}
+              addGameToBoard={boardActions?.addGameToBoard}
+              onSelect={advance}
+            />
+          </div>
+        ) : stepIndex === 2 ? (
+          <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
+            <QuestGameSearchStep
+              title={currentQuest.title}
+              description={'"To Play" is your backlog — save a game there to keep track of what\'s next.'}
+              targetColumnId={boardData?.columnOrder?.[0]}
               addGameToBoard={boardActions?.addGameToBoard}
               onSelect={advance}
             />
