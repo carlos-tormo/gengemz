@@ -100,3 +100,11 @@ es otro campo del tablero.
 - **Cómo se despliega**: `cd frontend && npm run build && firebase deploy` desde la raíz. No hay
   pipeline; **no hay CI** que ejecute los gates en push/PR (deuda conocida).
 - **Dónde se anota el desfase main↔producción**: `.agents/notes/qa-pendiente-main.md`.
+- **Clave RAWG (`searchGames`)**: vive en **Firebase Secret Manager** del proyecto
+  `gengemztest-9582e`, no en el repo. Gestión: `firebase functions:secrets:get RAWG_API_KEY`
+  (metadata/versiones), `:access RAWG_API_KEY` (valor vigente), `:set RAWG_API_KEY` (rotarla) —
+  eso es lo que usan el emulador de `functions` con `--project` real y producción.
+  `functions/.secret.local` (`*.local`, gitignored) es una **copia local** para cuando el emulador
+  no tiene proyecto real detrás: puede divergir de Secret Manager sin que nada avise, y un 401 ahí
+  no implica que la clave de producción esté caducada — compruébalo contra Secret Manager antes de
+  asumir que hay que renovarla en rawg.io.
