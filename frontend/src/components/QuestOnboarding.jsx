@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import Modal from './Modal';
 import QuestGameSearchStep from './QuestGameSearchStep';
-import { playingColumnId } from '../services/boardService';
+import { playingColumnId, completionColumnId } from '../services/boardService';
 
-// Placeholder content — issues #10-#12 replace quests 2-4's title/description/interaction.
-// Quest 1 (#9) is real, rendered via QuestGameSearchStep below. This shell only owns
-// pagination, progress, skip and the completion flag.
+// Placeholder content — issues #11-#12 replace quests 3-4's title/description/interaction.
+// Quests 1 (#9) and 2 (#10) are real, rendered via QuestGameSearchStep below. This shell only
+// owns pagination, progress, skip and the completion flag.
 const QUESTS = [
   { title: '¿A qué estás jugando?' },
-  { title: 'Quest 2', description: 'Coming soon.' },
+  { title: '¿Has completado algo últimamente?' },
   { title: 'Quest 3', description: 'Coming soon.' },
   { title: 'Quest 4', description: 'Coming soon.' },
 ];
@@ -65,6 +65,16 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData }) => {
               title={currentQuest.title}
               description={'The "Currently Playing" column is what you\'re playing right now — track a game there so you (and friends who follow you) can see it at a glance.'}
               targetColumnId={playingColumnId(boardData) || boardData?.columnOrder?.[0]}
+              addGameToBoard={boardActions?.addGameToBoard}
+              onSelect={advance}
+            />
+          </div>
+        ) : stepIndex === 1 ? (
+          <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
+            <QuestGameSearchStep
+              title={currentQuest.title}
+              description={'"Victory Road" is where finished games go — drop one there to mark it complete and add it to your progression.'}
+              targetColumnId={completionColumnId(boardData) || boardData?.columnOrder?.[0]}
               addGameToBoard={boardActions?.addGameToBoard}
               onSelect={advance}
             />

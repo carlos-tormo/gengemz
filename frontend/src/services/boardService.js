@@ -92,6 +92,15 @@ export const playingColumnId = (model) => (model?.columnOrder || [])
   .find((id) => model?.columns?.[id]?.isPlaying === true) || null;
 
 /**
+ * A column to land a "just finished" game on. Unlike `isPlaying`, any number
+ * of columns may carry `isCompletion` (see `columnFromForm` below), so this
+ * picks the first one in `columnOrder` rather than assuming there is exactly
+ * one.
+ */
+export const completionColumnId = (model) => (model?.columnOrder || [])
+  .find((id) => isCompletionColumn(model, id)) || null;
+
+/**
  * What a "currently playing" row needs, decided from the board model alone:
  * which list the owner flagged `isPlaying` (decision 9 — never the literal id
  * 'playing') and, for a schema-1 board whose games ride inside the document,
