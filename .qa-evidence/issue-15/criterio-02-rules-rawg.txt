@@ -1,0 +1,5 @@
+103:- **Clave RAWG (`searchGames`)**: vive en **Firebase Secret Manager** del proyecto
+104:  `gengemztest-9582e`, no en el repo. Gestión: `firebase functions:secrets:get RAWG_API_KEY`
+105:  (metadata/versiones), `:access RAWG_API_KEY` (valor vigente), `:set RAWG_API_KEY` (rotarla) —
+108:  no tiene proyecto real detrás: puede divergir de Secret Manager sin que nada avise, y un 401 ahí
+109:  no implica que la clave de producción esté caducada — compruébalo contra Secret Manager antes de
