@@ -7,6 +7,17 @@ Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde 200. No
 el onboarding en esa cuenta real para no escribir sobre datos ajenos a la verificación (el criterio
 de "columna nueva visible" ya quedó comprobado en el QA funcional contra los emuladores).
 
+## Issue #15 — clave RAWG en `.secret.local` caducada (PR #19)
+
+QA funcional con 2/2 criterios verificados contra el emulador de `functions` real (comentario:
+https://github.com/carlos-tormo/gengemz/pull/19#issuecomment-5575461901). Refinamiento previo
+(`/refine`) corrigió un dato falso del enunciado: la clave de producción (Firebase Secret Manager)
+nunca estuvo caducada — solo la copia local en `functions/.secret.local` (fichero gitignored). El
+diff mergeado a `main` **solo toca `.agents/rules/global.md`** (documentación de dónde se
+gestiona/renueva la clave); no hay cambios en `firestore.rules`, `functions/` ni `frontend/`.
+**Sin desfase pendiente para este issue** — no hay nada desplegable que sincronizar entre `main` y
+producción, así que no requiere `firebase deploy`.
+
 ## Issue #12 — Quest 4, creación de columnas propias (PR #18)
 
 QA funcional con 4/4 criterios verificados contra Firestore/Auth emulators reales (comentario:
