@@ -1,0 +1,27 @@
+=== Criterio 2/5: gating derivado (privacy + questOnboardingCompleted) tras handleOnboardingComplete ===
+(node:45625) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  usuario de prueba (emulador): yyA0L2u7U7F9lFwPk1gNuXg4wkCg qa-issue8-1788781691043@example.test
+  settings tras completar privacidad: {"bio":"","displayName":"QA Issue 8","privacy":"public"}
+  ok    quest onboarding se abriría justo después de completar la privacidad
+  settings tras completar/saltar la última quest: {"displayName":"QA Issue 8","bio":"","privacy":"public","questOnboardingCompleted":true}
+  ok    completeQuestOnboarding() no lanza (antes del fix: permission-denied)
+  ok    questOnboardingCompleted persiste como true en Firestore
+  ok    tras el flag, un reload/relogin ya NO reabriría el onboarding
+
+=== Criterio 6: cerrar a mitad de recorrido no escribe el flag ===
+  usuario de prueba (emulador): 7DViMkLQWDuqVhJjPMUIsXAOAu6H qa-issue8-midway-1788781693815@example.test
+  settings sin llegar al final: {"bio":"","displayName":"QA Midway","privacy":"public"}
+  ok    el flag sigue sin escribirse
+  ok    el siguiente login retomaría el onboarding (desde el paso 1, por diseño del componente)
+
+=== Regla: un no-owner no puede escribir el flag de otro usuario (gate de seguridad, no de la app) ===
+[2026-09-07T11:48:13.907Z]  @firebase/firestore: Firestore (12.6.0): GrpcConnection RPC 'Write' stream 0x413fadbd error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L419, false for 'create' @ L488, false for 'update' @ L419, false for 'update' @ L488
+  intento de escritura ajena rechazado: permission-denied
+  ok    un usuario no puede marcar el flag de otro
+
+=== Criterio (gating): anónimo nunca cumple la condición de apertura, sea cual sea `privacy` ===
+  ok    anónimo con privacy=public no abriría el quest onboarding
+
+8 passed, 0 failed
