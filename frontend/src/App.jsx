@@ -1059,7 +1059,12 @@ export default function App() {
       </Modal>
 
       {/* Quest Onboarding (paginated tour, fires once privacy is set and stays open until finished) */}
-      <QuestOnboarding isOpen={isQuestOnboardingOpen} onComplete={completeQuestOnboarding} />
+      <QuestOnboarding
+        isOpen={isQuestOnboardingOpen}
+        onComplete={completeQuestOnboarding}
+        boardActions={boardActions}
+        boardData={data}
+      />
 
       {/* Browse Games Page Section */}
       <Modal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} title="Settings & Privacy">
