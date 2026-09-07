@@ -109,6 +109,12 @@ export const saveUserSettings = async (user, settings) => {
   }, { merge: true });
 };
 
+export const completeQuestOnboarding = async (user) => {
+  if (!user) return;
+
+  await setDoc(userDataDoc(user.uid, 'settings'), { questOnboardingCompleted: true }, { merge: true });
+};
+
 export const createDebugProfiles = async (user) => {
   if (!user) return;
 
