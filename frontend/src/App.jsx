@@ -386,6 +386,7 @@ export default function App() {
 
   const handleFollowAction = async (profile) => {
     if (!user) { alert("Please sign in to follow players."); return; }
+    if (user.isAnonymous) { handleLogin(); return; }
     const isFollowing = !!relationships.following[profile.uid];
     const res = isFollowing ? await unfollow(profile.uid) : await follow(profile);
     if (!res?.ok && res?.error) {

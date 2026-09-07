@@ -27,6 +27,7 @@ const gamesCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'ga
 const activityRef = (db, uid, eventId) => P(db, 'users', uid, 'activity', eventId);
 const activityCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'activity');
 const notificationRef = (db, uid, id) => P(db, 'users', uid, 'notifications', id);
+const playlistRef = (db, id) => P(db, 'playlists', id);
 
 // Seed: alice public, bob invite_only, carol private. Each has a board.
 await env.withSecurityRulesDisabled(async (ctx) => {
@@ -117,6 +118,28 @@ await t('unblocked stranger can follow public alice', () => assertSucceeds(setDo
   uid: 'alice', displayName: 'alice', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
 await t('unblocked stranger can add self to alice followers', () => assertSucceeds(setDoc(rel(dave, 'alice', 'followers', 'dave'), {
   uid: 'dave', displayName: 'dave', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
+
+console.log('Anonymous accounts cannot write social relationships');
+const anonToken = { firebase: { sign_in_provider: 'anonymous' } };
+const asAnon = (uid) => env.authenticatedContext(uid, anonToken).firestore();
+const ivy = asAnon('ivy');
+await t('anonymous cannot follow public alice', () => assertFails(setDoc(rel(ivy, 'ivy', 'following', 'alice'), {
+  uid: 'alice', displayName: 'alice', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
+await t('anonymous cannot request invite_only bob', () => assertFails(setDoc(rel(ivy, 'ivy', 'following', 'bob'), {
+  uid: 'bob', displayName: 'bob', photoURL: '', status: 'pending', updatedAt: serverTimestamp() })));
+await t('anonymous cannot request bob directly', () => assertFails(setDoc(rel(ivy, 'bob', 'requests', 'ivy'), {
+  uid: 'ivy', displayName: 'ivy', photoURL: '', status: 'pending', createdAt: serverTimestamp() })));
+await t('anonymous cannot add self to alice followers', () => assertFails(setDoc(rel(ivy, 'alice', 'followers', 'ivy'), {
+  uid: 'ivy', displayName: 'ivy', photoURL: '', status: 'following', updatedAt: serverTimestamp() })));
+await t('anonymous cannot accept a pending request', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(rel(ctx.firestore(), 'ivy', 'requests', 'judy'), { uid: 'judy', status: 'pending', createdAt: new Date() });
+  });
+  await assertFails(setDoc(rel(ivy, 'ivy', 'followers', 'judy'), {
+    uid: 'judy', displayName: 'judy', photoURL: '', status: 'following', updatedAt: serverTimestamp() }));
+});
+await t('anonymous cannot block someone', () => assertFails(setDoc(rel(ivy, 'ivy', 'blocked', 'alice'), {
+  uid: 'alice', displayName: 'alice', blockedAt: serverTimestamp() })));
 
 console.log('Board document (schema 2)');
 const alice = as('alice');
@@ -312,6 +335,28 @@ await t('owner cannot create a notification', () => assertFails(
   setDoc(notificationRef(alice, 'alice', 'forged'), notification()),
 ));
 await t('owner cannot delete a notification', () => assertFails(deleteDoc(notificationRef(alice, 'alice', 'n1'))));
+
+console.log('Playlists');
+const publicPlaylist = (ownerUid) => ({
+  title: 'My playlist', description: '', ownerUid, ownerName: 'dave', privacy: 'public',
+  items: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+});
+await t('real user creates a public playlist', () => assertSucceeds(
+  setDoc(playlistRef(dave, 'pl-dave'), publicPlaylist('dave')),
+));
+await t('anonymous cannot create a public playlist', () => assertFails(
+  setDoc(playlistRef(ivy, 'pl-ivy'), publicPlaylist('ivy')),
+));
+await t('anonymous can create a private playlist', () => assertSucceeds(
+  setDoc(playlistRef(ivy, 'pl-ivy-private'), { ...publicPlaylist('ivy'), privacy: 'private' }),
+));
+await t('anonymous cannot flip a private playlist to public via update', () => assertFails(
+  setDoc(playlistRef(ivy, 'pl-ivy-private'), { privacy: 'public', updatedAt: serverTimestamp() }, { merge: true }),
+));
+await t('real user can create private and then flip it to public via update', async () => {
+  await assertSucceeds(setDoc(playlistRef(dave, 'pl-dave-private'), { ...publicPlaylist('dave'), privacy: 'private' }));
+  await assertSucceeds(setDoc(playlistRef(dave, 'pl-dave-private'), { privacy: 'public', updatedAt: serverTimestamp() }, { merge: true }));
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();

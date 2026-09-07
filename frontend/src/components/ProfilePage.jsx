@@ -422,7 +422,7 @@ const ProfilePage = ({
                   {copied ? <Check size={14} className="text-green-500" /> : <LinkIcon size={14} />}
                   {copied ? 'Copied' : 'Copy link'}
                 </button>
-                {user && !isOwnProfile && !user.isAnonymous && (
+                {user && !isOwnProfile && (
                   isBlocked ? (
                     <button onClick={() => onUnblock(profile.uid)} className="px-3 py-1.5 rounded-lg bg-[var(--panel-muted)] border border-[var(--border)] text-[var(--text)] text-sm hover:border-[var(--accent)]">Unblock</button>
                   ) : (
@@ -430,12 +430,11 @@ const ProfilePage = ({
                       <button onClick={() => onFollowAction(profile)} className="px-3 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-semibold">
                         {followLabel}
                       </button>
-                      <button onClick={() => onBlockAction(profile)} className="px-3 py-1.5 rounded-lg bg-red-100 text-red-700 text-sm border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
+                      {!user.isAnonymous && (
+                        <button onClick={() => onBlockAction(profile)} className="px-3 py-1.5 rounded-lg bg-red-100 text-red-700 text-sm border border-red-200 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800">Block</button>
+                      )}
                     </>
                   )
-                )}
-                {user?.isAnonymous && !isOwnProfile && (
-                  <span className="text-xs text-[var(--text-muted)] self-center">Sign in to follow players.</span>
                 )}
               </div>
             </div>

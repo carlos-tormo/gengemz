@@ -5,6 +5,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isRealUser() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != "anonymous";
+    }
+
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
     }
@@ -127,10 +131,6 @@ service cloud.firestore {
 
     function validOptionalInt(data, field, min, max) {
       return !(field in data) || (data[field] is int && data[field] >= min && data[field] <= max);
-    }
-
-    function validOptionalBool(data, field) {
-      return !(field in data) || data[field] is bool;
     }
 
     function validOptionalTimestamp(data, field) {
@@ -277,6 +277,7 @@ service cloud.firestore {
           "updatedAt"
         ]) &&
         data.ownerUid == request.auth.uid &&
+        (data.privacy != "public" || isRealUser()) &&
         validString(data.title, 120) &&
         validOptionalString(data, "description", 1000) &&
         validOptionalString(data, "ownerName", 80) &&
@@ -300,6 +301,7 @@ service cloud.firestore {
         before.ownerUid == request.auth.uid &&
         after.ownerUid == before.ownerUid &&
         after.createdAt == before.createdAt &&
+        (after.privacy != "public" || isRealUser()) &&
         validString(after.title, 120) &&
         validOptionalString(after, "description", 1000) &&
         validOptionalString(after, "ownerName", 80) &&
@@ -326,6 +328,7 @@ service cloud.firestore {
         (
           // The follower writes their own "following" entry.
           (userId == request.auth.uid &&
+            isRealUser() &&
             hasVisibleProfile(appId, profileId) &&
             !isBlockedBy(appId, profileId) &&
             (
@@ -334,6 +337,7 @@ service cloud.firestore {
             )) ||
           // The invite-only target accepts: flips the requester's entry from pending to following.
           (profileId == request.auth.uid &&
+            isRealUser() &&
             (resource == null || resource.data.status == "pending") &&
             data.status == "following" &&
             hasPendingRequestFrom(appId, profileId, userId))
@@ -349,17 +353,20 @@ service cloud.firestore {
         (
           // A follower adds themselves to a public user's followers list.
           (profileId == request.auth.uid &&
+            isRealUser() &&
             hasVisibleProfile(appId, userId) &&
             profilePrivacy(appId, userId) == "public" &&
             !isBlockedBy(appId, userId)) ||
           // The list owner accepts a pending request (invite_only).
           (userId == request.auth.uid &&
+            isRealUser() &&
             hasPendingRequestFrom(appId, userId, profileId))
         );
     }
 
     function validRequests(appId, userId, profileId, data) {
       return profileId == request.auth.uid &&
+        isRealUser() &&
         userId != profileId &&
         hasVisibleProfile(appId, userId) &&
         profilePrivacy(appId, userId) == "invite_only" &&
@@ -372,6 +379,7 @@ service cloud.firestore {
 
     function validBlocked(userId, profileId, data) {
       return userId == request.auth.uid &&
+        isRealUser() &&
         userId != profileId &&
         data.keys().hasOnly(["uid", "displayName", "photoURL", "blockedAt"]) &&
         validRelationshipBase(data, profileId) &&
