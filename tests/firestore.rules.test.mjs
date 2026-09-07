@@ -21,6 +21,7 @@ const env = await initializeTestEnvironment({
 
 const P = (db, ...seg) => doc(db, 'artifacts', APP, ...seg);
 const boardRef = (db, uid) => P(db, 'users', uid, 'data', 'board');
+const settingsRef = (db, uid) => P(db, 'users', uid, 'data', 'settings');
 const rel = (db, owner, type, other) => P(db, 'relationships', owner, type, other);
 const gameRef = (db, uid, gameId) => P(db, 'users', uid, 'games', gameId);
 const gamesCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'games');
@@ -152,6 +153,23 @@ await t('v2 board cannot be downgraded to legacy shape', () => assertFails(setDo
 await t('legacy board still accepts legacy shape (until S3)', () => assertSucceeds(setDoc(boardRef(as('zoe'), 'zoe'), { games: {}, columns: {}, columnOrder: [] })));
 await t('legacy board can upgrade to v2', () => assertSucceeds(setDoc(boardRef(as('zoe'), 'zoe'), v2Board())));
 await t('non-owner cannot write board', () => assertFails(setDoc(boardRef(dave, 'alice'), v2Board())));
+
+console.log('Settings document (issue #8 quest onboarding flag)');
+await t('owner sets questOnboardingCompleted alongside privacy', () => assertSucceeds(
+  setDoc(settingsRef(alice, 'alice'), { privacy: 'public', displayName: 'alice', questOnboardingCompleted: true }),
+));
+await t('owner merges questOnboardingCompleted onto existing settings', () => assertSucceeds(
+  setDoc(settingsRef(alice, 'alice'), { questOnboardingCompleted: true }, { merge: true }),
+));
+await t('owner cannot set questOnboardingCompleted to a non-bool', () => assertFails(
+  setDoc(settingsRef(alice, 'alice'), { questOnboardingCompleted: 'yes' }, { merge: true }),
+));
+await t('settings still rejects unknown fields alongside questOnboardingCompleted', () => assertFails(
+  setDoc(settingsRef(alice, 'alice'), { questOnboardingCompleted: true, extra: 'nope' }, { merge: true }),
+));
+await t('non-owner cannot write another user settings', () => assertFails(
+  setDoc(settingsRef(dave, 'alice'), { questOnboardingCompleted: true }, { merge: true }),
+));
 
 console.log('Game documents: owner CRUD');
 const game = (id, extra = {}) => ({

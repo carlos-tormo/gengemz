@@ -88,6 +88,10 @@ service cloud.firestore {
       return !(field in data) || data[field] is number;
     }
 
+    function validOptionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
     function validSearchTokens(tokens) {
       return tokens is list &&
         tokens.size() <= 80 &&
@@ -192,10 +196,11 @@ service cloud.firestore {
     }
 
     function validSettings(data) {
-      return data.keys().hasOnly(["privacy", "bio", "displayName"]) &&
+      return data.keys().hasOnly(["privacy", "bio", "displayName", "questOnboardingCompleted"]) &&
         (!("privacy" in data) || validPrivacy(data.privacy)) &&
         validOptionalString(data, "bio", 500) &&
-        validOptionalString(data, "displayName", 80);
+        validOptionalString(data, "displayName", 80) &&
+        validOptionalBool(data, "questOnboardingCompleted");
     }
 
     function validUserDataDoc(docId, data) {

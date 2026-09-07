@@ -22,6 +22,7 @@ import {
 
 // Components
 import Modal from './components/Modal';
+import QuestOnboarding from './components/QuestOnboarding';
 import IconRenderer from './components/IconRenderer';
 import GameCard from './components/GameCard';
 import UserMenu from './components/UserMenu';
@@ -74,6 +75,8 @@ export default function App() {
     setUserSettings,
     isOnboardingModalOpen,
     setIsOnboardingModalOpen,
+    isQuestOnboardingOpen,
+    completeQuestOnboarding,
     saveUserSettings,
     createDebugProfiles: seedDebugProfiles,
     searchPublicProfiles,
@@ -1054,6 +1057,9 @@ export default function App() {
           </form>
         </div>
       </Modal>
+
+      {/* Quest Onboarding (paginated tour, fires once privacy is set and stays open until finished) */}
+      <QuestOnboarding isOpen={isQuestOnboardingOpen} onComplete={completeQuestOnboarding} />
 
       {/* Browse Games Page Section */}
       <Modal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} title="Settings & Privacy">
