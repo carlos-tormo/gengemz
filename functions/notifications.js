@@ -21,12 +21,22 @@
 const {onDocumentCreated, onDocumentUpdated} =
   require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
+// Modular API, not `admin.firestore()` / `admin.firestore.FieldValue`: the
+// Functions emulator's admin-SDK proxy (firebase-tools) loses the
+// `.FieldValue` static off the compat namespace, so every write here threw
+// "Cannot read properties of undefined (reading 'serverTimestamp')" the
+// first time these triggers actually ran (found live against the emulator
+// in /qa-funcional). Confirmed independent of the Node version. `activity.js`
+// uses the same compat pattern and has the same latent bug — never
+// exercised for real before either (see qa-pendiente-main.md) — tracked
+// separately, out of scope for this file.
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const events = require("./notificationEvents");
 
 if (!admin.apps.length) admin.initializeApp();
 
-const db = () => admin.firestore();
-const serverTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
+const db = () => getFirestore();
+const serverTimestamp = () => FieldValue.serverTimestamp();
 
 const notificationsCollection = (appId, uid) => db()
     .collection("artifacts").doc(appId)
