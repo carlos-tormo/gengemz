@@ -62,9 +62,8 @@ no se reinterpreta en silencio.
 
 ## Flujo de trabajo (GitHub)
 
-- **Repo**: `carlos-tormo/gengemz` · **Tablero**: ⚠️ **pendiente de crear** — hasta que exista, las
-  skills de proceso no tienen dónde poner el estado. Ejecutar `/new-project` para crearlo y
-  sustituir esta línea por `[Project <n> de carlos-tormo](<url>)`. Las tareas son **issues** de este repo.
+- **Repo**: `carlos-tormo/gengemz` · **Tablero**: [Project 1 de carlos-tormo](https://github.com/users/carlos-tormo/projects/1)
+  (enlazado al repo). Las tareas son **issues** de este repo.
 
 ### El estado vive en el tablero; los labels dicen el tipo
 
