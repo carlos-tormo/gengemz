@@ -432,6 +432,17 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Notifications (S8). Created only by the Cloud Functions triggers
+      // (admin SDK, bypasses rules) — owner-only, so none of the S7 query
+      // problem applies. The one client write allowed is marking a
+      // notification read on open, and only that field.
+      match /users/{userId}/notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow update: if isOwner(userId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readAt"]);
+        allow create, delete: if false;
+      }
+
       match /public_profiles/{profileId} {
         allow get, list: if isOwner(profileId) ||
           resource.data.privacy in ["public", "invite_only"];

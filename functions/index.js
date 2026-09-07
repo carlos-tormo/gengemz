@@ -3,6 +3,7 @@ const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const fetch = require("node-fetch");
 const activity = require("./activity");
+const notifications = require("./notifications");
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -259,3 +260,13 @@ exports.searchGames = onRequest(
 exports.onGameWritten = activity.onGameWritten;
 exports.onPublicPlaylistCreated = activity.onPublicPlaylistCreated;
 exports.pruneActivityEvents = activity.pruneActivityEvents;
+
+/* =======================
+   NOTIFICATIONS (S8)
+   ======================= */
+
+// Defined in notifications.js; re-exported here for the same reason as the
+// activity triggers above.
+exports.onFollowRequestCreated = notifications.onFollowRequestCreated;
+exports.onFollowAccepted = notifications.onFollowAccepted;
+exports.onNewFollower = notifications.onNewFollower;
