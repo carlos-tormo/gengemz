@@ -1,11 +1,21 @@
 # QA pendiente entre `main` y producción
 
-**Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
-2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #18 / issue #12 — sin cambios
-en `firestore.rules` ni `functions/` en este PR tampoco, deploy de refresco en esas dos capas).
-Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde 200. No se interactuó con
-el onboarding en esa cuenta real para no escribir sobre datos ajenos a la verificación (el criterio
-de "columna nueva visible" ya quedó comprobado en el QA funcional contra los emuladores).
+**Estado:** `main` tiene un cambio sin desplegar — issue #20 (PR #21, mergeado 2026-09-08,
+`4578c91`) no ha recibido `firebase deploy`. Producción sigue sirviendo el build de `main@47423aa`
+(el que se desplegó el 2026-09-07 tras el PR #18). Pendiente: `cd frontend && npm run build &&
+firebase deploy` (o `--only hosting`, ya que el fix es solo frontend) antes de que el arreglo
+llegue a usuarios reales.
+
+## Issue #20 — buscador de juegos del onboarding inservible tras el primer quest (PR #21)
+
+QA funcional con 4/4 criterios verificados contra emuladores reales (`functions` con RAWG real vía
+`.secret.local` + `npm run dev`), comentario:
+https://github.com/carlos-tormo/gengemz/pull/21#issuecomment-5576067008. Fix de una línea de
+alcance (`key={stepIndex}` en las tres instancias de `<QuestGameSearchStep>` de
+`QuestOnboarding.jsx`) — solo toca `frontend/`, sin cambios en `firestore.rules` ni `functions/`.
+Refinamiento previo (`/refine`) no encontró datos falsos ni criterios ya cumplidos; solo corrigió
+una imprecisión de línea. **Sin desfase de Firestore/functions que sincronizar** — el único
+pendiente es el `firebase deploy` de hosting para que el fix llegue a producción.
 
 ## Issue #15 — clave RAWG en `.secret.local` caducada (PR #19)
 
