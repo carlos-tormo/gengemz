@@ -1,12 +1,24 @@
 # QA pendiente entre `main` y producción
 
 **Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
-2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #17 / issue #11 — sin cambios
+2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #18 / issue #12 — sin cambios
 en `firestore.rules` ni `functions/` en este PR tampoco, deploy de refresco en esas dos capas).
-Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde 200 y, con la sesión de
-navegador ya autenticada, el onboarding paginado sigue abriendo en Quest 1 (esa cuenta real no ha
-completado el onboarding) — no se interactuó con el modal para no escribir sobre una cuenta real
-ajena a la verificación.
+Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde 200. No se interactuó con
+el onboarding en esa cuenta real para no escribir sobre datos ajenos a la verificación (el criterio
+de "columna nueva visible" ya quedó comprobado en el QA funcional contra los emuladores).
+
+## Issue #12 — Quest 4, creación de columnas propias (PR #18)
+
+QA funcional con 4/4 criterios verificados contra Firestore/Auth emulators reales (comentario:
+https://github.com/carlos-tormo/gengemz/pull/18#issuecomment-5574444495). Reutiliza el modal
+existente "Create New List" (`openAddColumnModal`/`handleSaveColumn` en `App.jsx`) sin
+reimplementarlo; nuevo flag `pendingQuestColumnCreate` en `App.jsx` para que guardar la columna
+desde el quest también cierre el onboarding y escriba `questOnboardingCompleted`. Refinamiento
+previo (`/refine`) corrigió dos datos falsos: dependencia real es #8 (no #1), y la línea de
+`handleSaveColumn` (681, no 1742) — mismo patrón de error de dependencia que #10/#11. Es la última
+quest del onboarding paginado abierto en #8: con este PR, las 4 quests (#9, #10, #11, #12) quedan
+completas.
+Desplegado hoy junto con el resto — sin desfase pendiente para este issue.
 
 ## Issue #11 — Quest 3, "algo que quieras jugar en el futuro" (PR #17)
 
