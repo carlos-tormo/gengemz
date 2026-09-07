@@ -1,7 +1,32 @@
 # QA pendiente entre `main` y producción
 
 **Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
-2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #13 / issue #8). Incluye
+2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #14 / issue #9 — sin cambios
+en `firestore.rules` ni `functions/` en este PR, así que el deploy fue de refresco, no de contenido
+nuevo en esas dos capas). Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde
+y, con la sesión de navegador ya autenticada, el onboarding paginado abre en Quest 1 con el
+contenido real de #9 (título "¿A qué estás jugando?", buscador, copy de "Currently Playing") — no
+se interactuó más con ese modal (no se buscó ni se añadió ningún juego) para no escribir sobre una
+cuenta real ajena a la verificación.
+
+## Issue #9 — Quest 1, buscador de juegos (PR #14)
+
+QA funcional con 6/6 criterios verificados contra Firestore/Functions emulators reales (comentario:
+https://github.com/carlos-tormo/gengemz/pull/14#issuecomment-5571588048). Hallazgo de
+infraestructura no bloqueante: la clave RAWG en `functions/.secret.local` está caducada (401 real
+contra `api.rawg.io`, confirmado en el log del emulador) — abierto como issue propio, #15
+(Backlog); mientras tanto cualquier búsqueda real en producción devolverá error hasta que se
+renueve.
+Desplegado hoy junto con el resto — sin desfase pendiente para este issue.
+
+---
+
+## Histórico
+
+### Deploy de #8 (PR #13), 2026-09-07
+
+`main` y producción sincronizados en `firestore.rules`, `hosting` y functions
+(`firebase deploy` completo, sin `--only`, tras mergear PR #13 / issue #8). Incluye
 además el `chore: link project board` (8d572b2) que se había quedado sin subir a `origin/main` en
 una sesión anterior — `/deploy` lo detectó al fallar el fast-forward, lo reconcilió con un merge de
 `origin/main` en local y lo empujó junto con el merge de #13. Smoke check tras el deploy:
