@@ -8,6 +8,7 @@ import {
   addGameToBoardData,
   applyChange,
   cleanGameDuplicates,
+  completionColumnId,
   computeUserStats,
   deleteColumnFromBoardData,
   isCompletionColumn,
@@ -265,6 +266,20 @@ t('renaming a list keeps the flag it already had', () => {
   const change = saveColumnToBoardData(model, { id: 'playing', title: 'En curso', icon: 'gamepad', isPlaying: true, isCompletion: false }, true);
   assert.equal(change.boardPatch.columns.playing.isPlaying, true);
   assert.equal(change.boardPatch.columns.playing.title, 'En curso');
+});
+
+console.log('\nThe "finished game" landing spot (quest 2 onboarding, issue #10)');
+
+t('the first flagged list in column order is found, and nothing is found without one', () => {
+  assert.equal(completionColumnId(board()), 'completed');
+  const noCompletion = board();
+  delete noCompletion.columns.completed.isCompletion;
+  assert.equal(completionColumnId(noCompletion), null);
+});
+
+t('several completion lists resolve to the first one in columnOrder', () => {
+  const model = applyChange(board(), saveColumnToBoardData(board(), { id: 'playing', title: 'Currently Playing', icon: 'gamepad', isCompletion: true }, true));
+  assert.equal(completionColumnId(model), 'playing');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
