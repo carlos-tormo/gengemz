@@ -1,13 +1,25 @@
 # QA pendiente entre `main` y producción
 
 **Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
-2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #14 / issue #9 — sin cambios
-en `firestore.rules` ni `functions/` en este PR, así que el deploy fue de refresco, no de contenido
-nuevo en esas dos capas). Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde
-y, con la sesión de navegador ya autenticada, el onboarding paginado abre en Quest 1 con el
-contenido real de #9 (título "¿A qué estás jugando?", buscador, copy de "Currently Playing") — no
-se interactuó más con ese modal (no se buscó ni se añadió ningún juego) para no escribir sobre una
-cuenta real ajena a la verificación.
+2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #16 / issue #10 — sin cambios
+en `firestore.rules` ni `functions/` en este PR tampoco, deploy de refresco en esas dos capas).
+Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde y, con la sesión de
+navegador ya autenticada, el onboarding paginado sigue abriendo en Quest 1 (esa cuenta real no ha
+completado el onboarding) — no se interactuó con el modal para no escribir sobre una cuenta real
+ajena a la verificación.
+
+## Issue #10 — Quest 2, "has completado algo últimamente" (PR #16)
+
+QA funcional con 4/4 criterios verificados contra Firestore/Functions/Auth emulators reales
+(comentario: https://github.com/carlos-tormo/gengemz/pull/16#issuecomment-5573048058). Reutiliza
+`QuestGameSearchStep` (#9); se añadió `completionColumnId` a `boardService.js` (análogo a
+`playingColumnId`, tolerante a varias columnas `isCompletion`). Hallazgo de infraestructura
+repetido: la clave RAWG sigue caducada (#15, ya conocido, no bloqueante). Hallazgo nuevo, no
+investigado a fondo, fuera de alcance de #10: en un arranque de los emuladores el trigger
+`onGameWritten` falló una vez con `TypeError: Cannot read properties of undefined (reading
+'serverTimestamp')` en `functions/activity.js:26` (la siguiente ejecución del mismo trigger
+funcionó normal) — candidato a mirar si se repite.
+Desplegado hoy junto con el resto — sin desfase pendiente para este issue.
 
 ## Issue #9 — Quest 1, buscador de juegos (PR #14)
 
