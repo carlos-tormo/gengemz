@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { LogIn, LogOut, Settings, Users, Edit2, User, Link as LinkIcon, Check } from 'lucide-react';
+import { LogIn, LogOut, Settings, Users, Edit2, User, Link as LinkIcon, Check, Bell } from 'lucide-react';
 import useClickOutside from '../hooks/useClickOutside';
 
-const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOpenFriends, onOpenMyProfile, onCopyProfileLink }) => {
+const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOpenFriends, onOpenMyProfile, onCopyProfileLink, onOpenNotifications, unreadNotificationCount = 0 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const menuRef = useRef(null);
@@ -14,7 +14,7 @@ const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOp
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 p-1.5 pr-3 rounded-full bg-[var(--panel)] border border-[var(--border)] hover:border-[var(--accent)] transition-all shadow-sm"
+        className="relative flex items-center gap-2 p-1.5 pr-3 rounded-full bg-[var(--panel)] border border-[var(--border)] hover:border-[var(--accent)] transition-all shadow-sm"
       >
         {user.photoURL ? (
           <img src={user.photoURL} alt="Avatar" className="w-8 h-8 rounded-full object-cover" />
@@ -24,6 +24,11 @@ const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOp
           </div>
         )}
         <span className="text-sm font-medium text-[var(--text)] max-w-[100px] truncate hidden sm:block">{displayName}</span>
+        {unreadNotificationCount > 0 && (
+          <span className="absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+            {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+          </span>
+        )}
       </button>
       {isOpen && (
         <div className="absolute right-0 top-full mt-2 w-60 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-50">
@@ -36,6 +41,16 @@ const UserMenu = ({ user, onOpenProfile, onOpenSettings, onLogin, onLogout, onOp
               {!user.isAnonymous && onOpenMyProfile && <button onClick={() => { onOpenMyProfile(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><User size={16} /> My profile</button>}
               {!user.isAnonymous && onCopyProfileLink && <button onClick={async () => { await onCopyProfileLink(); setCopied(true); setTimeout(() => { setCopied(false); setIsOpen(false); }, 1200); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors">{copied ? <Check size={16} className="text-green-500" /> : <LinkIcon size={16} />} {copied ? 'Link copied' : 'Copy profile link'}</button>}
               {!user.isAnonymous && onOpenFriends && <button onClick={() => { onOpenFriends(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><Users size={16} /> Connections</button>}
+              {!user.isAnonymous && onOpenNotifications && (
+                <button onClick={() => { onOpenNotifications(); setIsOpen(false); }} className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors">
+                  <span className="flex items-center gap-2"><Bell size={16} /> Notifications</span>
+                  {unreadNotificationCount > 0 && (
+                    <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                      {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                    </span>
+                  )}
+                </button>
+              )}
               {user.isAnonymous ? <button onClick={() => { onLogin(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"><LogIn size={16} /> Sign In with Google</button> : <button onClick={() => { onLogout(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-lg transition-colors"><LogOut size={16} /> Sign Out</button>}
               {!user.isAnonymous && <button onClick={() => { onOpenProfile(); setIsOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-muted)] rounded-lg transition-colors"><Edit2 size={16} /> Edit Name</button>}
             </div>

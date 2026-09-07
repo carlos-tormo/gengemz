@@ -32,6 +32,7 @@ import BoardPage from './components/BoardPage';
 import ProfilePage from './components/ProfilePage';
 import ConnectionsPage from './components/ConnectionsPage';
 import FeedPage from './components/FeedPage';
+import NotificationsPage from './components/NotificationsPage';
 import logoWordmarkLight from './assets/logo-justword-light-2026.svg';
 import logoWordmarkDark from './assets/logo-justword-dark-2026.svg';
 
@@ -44,6 +45,7 @@ import useUserProfile from './hooks/useUserProfile';
 import useBoard from './hooks/useBoard';
 import useGameSearch from './hooks/useGameSearch';
 import useFeed from './hooks/useFeed';
+import useNotifications from './hooks/useNotifications';
 import { browseGames } from './services/rawgService';
 import { findPlaylistForGame as findPlaylistForGameInList } from './services/playlistService';
 import { createBoardGameFromRaw } from './services/boardService';
@@ -66,6 +68,7 @@ export default function App() {
     relationships, friends, feedSources, isLoading: areRelationshipsLoading,
     follow, unfollow, block, unblock, acceptRequest, declineRequest,
   } = useRelationships(user);
+  const notifications = useNotifications(user);
   const {
     userSettings,
     setUserSettings,
@@ -100,6 +103,7 @@ export default function App() {
   const openPlaylist = (id) => navigate(id ? `/playlists/${id}` : '/playlists');
   const closePlaylists = () => navigate('/');
   const openConnections = () => navigate('/connections');
+  const openNotifications = () => navigate('/notifications');
   const isFeedPage = pathname === '/feed';
 
   /*
@@ -999,7 +1003,7 @@ export default function App() {
                 />
               </div>
             )}
-            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={openConnections} onOpenMyProfile={() => navigate('/u/me')} onCopyProfileLink={copyOwnProfileLink} />}
+            {isAuthLoading ? <Loader2 className="animate-spin text-slate-500" size={20} /> : <UserMenu user={user} onOpenSettings={() => setIsSettingsModalOpen(true)} onLogin={handleLogin} onOpenProfile={() => setIsSettingsModalOpen(true)} onLogout={handleLogout} onOpenFriends={openConnections} onOpenMyProfile={() => navigate('/u/me')} onCopyProfileLink={copyOwnProfileLink} onOpenNotifications={openNotifications} unreadNotificationCount={notifications.unreadCount} />}
             {!showLanding && !isDataLoading && !isFavoritesView && <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-purple-900/20 active:scale-95"><Plus size={18} /><span className="hidden sm:inline">Add Game</span></button>}
          </div>
         </div>
@@ -1164,6 +1168,16 @@ export default function App() {
                 isGameOnBoard={isFeedGameOnBoard}
                 isBoardReady={!isDataLoading}
                 onCopyProfileLink={copyOwnProfileLink}
+              />
+            }
+          />
+          <Route
+            path="/notifications"
+            element={
+              <NotificationsPage
+                user={user}
+                isAuthLoading={isAuthLoading}
+                notifications={notifications}
               />
             }
           />

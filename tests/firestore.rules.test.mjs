@@ -26,6 +26,7 @@ const gameRef = (db, uid, gameId) => P(db, 'users', uid, 'games', gameId);
 const gamesCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'games');
 const activityRef = (db, uid, eventId) => P(db, 'users', uid, 'activity', eventId);
 const activityCol = (db, uid) => collection(db, 'artifacts', APP, 'users', uid, 'activity');
+const notificationRef = (db, uid, id) => P(db, 'users', uid, 'notifications', id);
 
 // Seed: alice public, bob invite_only, carol private. Each has a board.
 await env.withSecurityRulesDisabled(async (ctx) => {
@@ -281,6 +282,36 @@ await t('owner cannot write their own activity', () => assertFails(setDoc(activi
 await t('owner cannot edit their own activity', () => assertFails(setDoc(activityRef(alice, 'alice', 'alice-e1'), { type: 'game_completed' }, { merge: true })));
 await t('owner cannot delete their own activity', () => assertFails(deleteDoc(activityRef(alice, 'alice', 'alice-e1'))));
 await t('stranger cannot write to someone else activity', () => assertFails(setDoc(activityRef(dave, 'alice', 'forged2'), event('alice'))));
+
+console.log('Notifications (S8)');
+// Written by the triggers with the admin SDK, so seeded with the rules
+// disabled here; clients may only ever read their own and update `readAt`.
+const notification = (extra = {}) => ({
+  appId: APP, uid: 'alice', type: 'new_follower', fromUid: 'dave',
+  fromDisplayName: 'dave', fromPhotoURL: '', createdAt: new Date(), readAt: null, ...extra,
+});
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(notificationRef(db, 'alice', 'n1'), notification());
+  await setDoc(notificationRef(db, 'bob', 'n2'), notification({ uid: 'bob' }));
+});
+
+await t('owner reads own notification', () => assertSucceeds(getDoc(notificationRef(alice, 'alice', 'n1'))));
+await t('unauthenticated cannot read a notification', () => assertFails(getDoc(notificationRef(anon, 'alice', 'n1'))));
+await t('stranger cannot read another user notification', () => assertFails(getDoc(notificationRef(dave, 'alice', 'n1'))));
+await t('owner marks own notification read', () => assertSucceeds(
+  setDoc(notificationRef(alice, 'alice', 'n1'), { readAt: serverTimestamp() }, { merge: true }),
+));
+await t('owner cannot change other fields alongside readAt', () => assertFails(
+  setDoc(notificationRef(alice, 'alice', 'n1'), { readAt: serverTimestamp(), type: 'follow_request' }, { merge: true }),
+));
+await t('stranger cannot mark another user notification read', () => assertFails(
+  setDoc(notificationRef(dave, 'alice', 'n1'), { readAt: serverTimestamp() }, { merge: true }),
+));
+await t('owner cannot create a notification', () => assertFails(
+  setDoc(notificationRef(alice, 'alice', 'forged'), notification()),
+));
+await t('owner cannot delete a notification', () => assertFails(deleteDoc(notificationRef(alice, 'alice', 'n1'))));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await env.cleanup();
