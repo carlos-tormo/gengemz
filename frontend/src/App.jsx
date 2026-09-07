@@ -676,6 +676,10 @@ export default function App() {
     .find((column) => column?.isPlaying === true)?.title || '';
 
   const openAddColumnModal = () => { if (data.columnOrder.length < 5) { setColumnForm({ id: createClientId('col'), title: '', icon: 'gamepad', isCompletion: false, isPlaying: false }); setIsEditingColumn(false); setIsColumnModalOpen(true); }};
+  // Quest 4 opens this same modal instead of reimplementing column creation; this flag is how
+  // handleSaveColumn knows a save should also close the onboarding (see its own comment below).
+  const [pendingQuestColumnCreate, setPendingQuestColumnCreate] = useState(false);
+  const openCreateColumnFromQuest = () => { openAddColumnModal(); setPendingQuestColumnCreate(true); };
   const openEditColumnModal = (c) => { setColumnForm({ id: c.id, title: c.title, icon: c.icon || 'gamepad', isCompletion: c.isCompletion === true, isPlaying: c.isPlaying === true }); setIsEditingColumn(true); setIsColumnModalOpen(true); };
   
   const handleSaveColumn = (e) => {
@@ -691,7 +695,12 @@ export default function App() {
       if (!ok) return;
     }
     boardActions.saveColumn(columnForm, isEditingColumn);
-    setIsColumnModalOpen(false); 
+    setIsColumnModalOpen(false);
+    // The column modal opened from quest 4: saving it is also how that quest completes.
+    if (pendingQuestColumnCreate) {
+      setPendingQuestColumnCreate(false);
+      completeQuestOnboarding();
+    }
   };
 
   const handleDeleteColumn = () => { 
@@ -1064,6 +1073,8 @@ export default function App() {
         onComplete={completeQuestOnboarding}
         boardActions={boardActions}
         boardData={data}
+        onOpenCreateColumn={openCreateColumnFromQuest}
+        canCreateColumn={data.columnOrder.length < 5}
       />
 
       {/* Browse Games Page Section */}
@@ -1750,7 +1761,7 @@ export default function App() {
         </div>
       </Modal>
 
-      <Modal isOpen={isColumnModalOpen} onClose={() => setIsColumnModalOpen(false)} title={isEditingColumn ? "Edit List" : "Create New List"}>
+      <Modal isOpen={isColumnModalOpen} onClose={() => { setIsColumnModalOpen(false); setPendingQuestColumnCreate(false); }} title={isEditingColumn ? "Edit List" : "Create New List"}>
         <form onSubmit={handleSaveColumn} className="space-y-6">
           <div>
             <label className="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2">List Title</label>
