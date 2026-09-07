@@ -2,28 +2,36 @@ import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import Modal from './Modal';
 import QuestGameSearchStep from './QuestGameSearchStep';
+import QuestCreateColumnStep from './QuestCreateColumnStep';
 import { playingColumnId, completionColumnId } from '../services/boardService';
 
-// Placeholder content — issue #12 replaces quest 4's title/description/interaction.
-// Quests 1 (#9), 2 (#10) and 3 (#11) are real, rendered via QuestGameSearchStep below. This shell
-// only owns pagination, progress, skip and the completion flag.
+// Quests 1 (#9), 2 (#10), 3 (#11) and 4 (#12) are all real, rendered below. This shell only owns
+// pagination, progress, skip and the completion flag.
 const QUESTS = [
   { title: '¿A qué estás jugando?' },
   { title: '¿Has completado algo últimamente?' },
   { title: '¿Algo que quieras jugar en el futuro?' },
-  { title: 'Quest 4', description: 'Coming soon.' },
+  { title: 'Make it yours' },
 ];
 
-const QuestOnboarding = ({ isOpen, onComplete, boardActions, boardData }) => {
+const QuestOnboarding = ({ isOpen, onComplete, boardActions, boardData, onOpenCreateColumn, canCreateColumn }) => {
   // Unmounted while closed, so its step state never needs resetting explicitly: the next
   // time it opens, React mounts a fresh instance starting at quest 1 — never persists the
   // in-progress step, closing mid-way (browser close, reload before the flag is written)
   // means it starts over next time, by design.
   if (!isOpen) return null;
-  return <QuestOnboardingSteps onComplete={onComplete} boardActions={boardActions} boardData={boardData} />;
+  return (
+    <QuestOnboardingSteps
+      onComplete={onComplete}
+      boardActions={boardActions}
+      boardData={boardData}
+      onOpenCreateColumn={onOpenCreateColumn}
+      canCreateColumn={canCreateColumn}
+    />
+  );
 };
 
-const QuestOnboardingSteps = ({ onComplete, boardActions, boardData }) => {
+const QuestOnboardingSteps = ({ onComplete, boardActions, boardData, onOpenCreateColumn, canCreateColumn }) => {
   const [stepIndex, setStepIndex] = useState(0);
 
   const isLastStep = stepIndex === QUESTS.length - 1;
@@ -90,9 +98,12 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData }) => {
             />
           </div>
         ) : (
-          <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6 min-h-[200px] flex flex-col justify-center gap-2">
-            <h3 className="text-lg font-bold text-[var(--text)]">{currentQuest.title}</h3>
-            <p className="text-sm text-[var(--text-muted)]">{currentQuest.description}</p>
+          <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
+            <QuestCreateColumnStep
+              title={currentQuest.title}
+              onOpenCreateColumn={onOpenCreateColumn}
+              canCreateColumn={canCreateColumn}
+            />
           </div>
         )}
 
