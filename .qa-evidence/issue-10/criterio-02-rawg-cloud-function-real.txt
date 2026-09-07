@@ -1,0 +1,11 @@
+Log del emulador de Cloud Functions durante la búsqueda "Hollow Knight" en Quest 2 (issue #10):
+
+i  functions: Beginning execution of "us-central1-searchGames"
+   - URL: "https://api.rawg.io/api/games?search=hollow+knight&page_size=10&key=e5fe5c904b9d4a518083fbb724b406b7"
+>  Error fetching games: Error: RAWG request failed with 401
+i  functions: Finished "us-central1-searchGames" in 1606.591375ms
+
+Confirma que la cadena QuestGameSearchStep -> useGameSearch -> searchGamesWithVariants ->
+Cloud Function searchGames -> RAWG funciona de extremo a extremo (misma cadena reutilizada de
+Quest 1, #9), reproduciendo el hallazgo ya documentado y abierto como issue #15 (clave RAWG
+caducada). No es un fallo de este PR.
