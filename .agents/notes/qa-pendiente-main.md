@@ -1,12 +1,24 @@
 # QA pendiente entre `main` y producción
 
 **Estado:** `main` y producción están sincronizados en `firestore.rules`, `hosting` y functions a
-2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #16 / issue #10 — sin cambios
+2026-09-07 (`firebase deploy` completo, sin `--only`, tras mergear PR #17 / issue #11 — sin cambios
 en `firestore.rules` ni `functions/` en este PR tampoco, deploy de refresco en esas dos capas).
-Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde y, con la sesión de
+Smoke check tras el deploy: `https://gengemztest-9582e.web.app` responde 200 y, con la sesión de
 navegador ya autenticada, el onboarding paginado sigue abriendo en Quest 1 (esa cuenta real no ha
 completado el onboarding) — no se interactuó con el modal para no escribir sobre una cuenta real
 ajena a la verificación.
+
+## Issue #11 — Quest 3, "algo que quieras jugar en el futuro" (PR #17)
+
+QA funcional con 4/4 criterios verificados contra Firestore/Functions/Auth emulators reales
+(comentario: https://github.com/carlos-tormo/gengemz/pull/17#issuecomment-5573627245). Reutiliza
+`QuestGameSearchStep` (#9); destino a la columna `backlog` resuelto como
+`boardData?.columnOrder?.[0]` (sin helper, a diferencia de `playingColumnId`/`completionColumnId`:
+`backlog` no lleva flag semántico y el resto del código ya usa su id literal directamente).
+Refinamiento previo (`/refine`) corrigió una dependencia falsa en el cuerpo del issue ("#2" → #9,
+mismo patrón de error que tuvo #10). Hallazgo de infraestructura repetido: la clave RAWG sigue
+caducada (#15, ya conocido, no bloqueante).
+Desplegado hoy junto con el resto — sin desfase pendiente para este issue.
 
 ## Issue #10 — Quest 2, "has completado algo últimamente" (PR #16)
 
