@@ -1,9 +1,29 @@
 # QA pendiente entre `main` y producción
 
-**Estado:** `main` y producción están sincronizados a 2026-09-07 (deploy de S8, PR #4,
-`firebase deploy` completo — hosting + firestore rules + functions, incluye por primera vez
-`firestore.rules` y Cloud Functions nuevas desde S7). Esta note registra lo que `/deploy` no pudo
-verificar en esa pasada, no un desfase de código.
+**Estado:** `main` tiene un commit sin desplegar por encima de producción a 2026-09-07: S9
+(issue #6, PR #7, merge `a5d9838`) cambió `firestore.rules` y no se ha ejecutado
+`firebase deploy` todavía. Hasta que se haga, producción sigue sirviendo las rules de antes de S9
+— es decir, **una sesión anónima en producción todavía puede seguir, pedir seguir, bloquear y
+publicar playlists públicas** (el agujero que S9 cierra). Prioridad de deploy alta por eso: es un
+cambio de seguridad, no una feature.
+
+## S9 — gate de escrituras sociales a cuentas no anónimas (PR #7, issue #6)
+
+- Rules: `isRealUser()` + gate en `validFollowing/Followers/Requests/Blocked/PlaylistCreate/PlaylistUpdate`.
+  Verificado con 117 tests de rules contra el emulador de Firestore (`cd tests && npm test`), en
+  verde en el HEAD del merge.
+- Criterio de UI (botón seguir/pedir visible para anónimos, abre login) sí se click-testeó en vivo
+  con Playwright — pero **no contra el proyecto Firebase real**: como no hay wiring de emuladores en
+  `frontend/src/config/firebase.js` (ver "Deuda de proceso" más abajo, ya conocido desde S7), el QA
+  aplicó un parche temporal *no commiteado* para apuntar `npm run dev` a los emuladores, capturó las
+  evidencias, y lo revirtió antes de terminar (`git checkout --` sobre `firebase.js`, `vite.config.js`,
+  `firebase.json`). El comportamiento en el sitio real desplegado (`gengemztest-9582e` en producción)
+  no se ha verificado clic a clic — sigue dependiendo de que el mismo código cliente que ya funciona
+  contra el emulador se comporte igual contra el proyecto real, cosa razonable pero no comprobada.
+- Primer paso para cerrar esto: tras el `firebase deploy`, abrir el sitio en producción con una
+  sesión anónima nueva (pestaña privada), navegar a `/u/<uid-publico>` y confirmar que el botón
+  "Follow"/"Request to follow" está visible y que al pulsarlo se abre el popup de Google en vez de
+  escribir en Firestore (que además debería fallar con permission-denied si algo se coló).
 
 ## S8 — notificaciones in-app (PR #4, issue #3)
 
