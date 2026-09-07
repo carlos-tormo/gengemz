@@ -1,0 +1,22 @@
+# GET settings (uid C) — modal de columna abierto y CANCELADO (X): el flag sigue en false
+curl -i http://127.0.0.1:8080/v1/projects/gengemztest-9582e/databases/(default)/documents/artifacts/gengemz-prod/users/NSaG7z9xowxKJUtMoFNyYwvxlp4l/data/settings -H 'Authorization: Bearer owner'
+HTTP/1.1 200 OK
+content-type: application/json
+content-length: 445
+
+{
+  "name": "projects/gengemztest-9582e/databases/(default)/documents/artifacts/gengemz-prod/users/NSaG7z9xowxKJUtMoFNyYwvxlp4l/data/settings",
+  "fields": {
+    "privacy": {
+      "stringValue": "public"
+    },
+    "displayName": {
+      "stringValue": "QA Issue 12 c"
+    },
+    "questOnboardingCompleted": {
+      "booleanValue": false
+    }
+  },
+  "createTime": "2026-09-07T18:27:37.733034Z",
+  "updateTime": "2026-09-07T18:27:37.733034Z"
+}

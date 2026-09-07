@@ -1,0 +1,104 @@
+# GET board (uid A) tras crear columna desde Quest 4 — columna nueva en columnOrder
+curl -i http://127.0.0.1:8080/v1/projects/gengemztest-9582e/databases/(default)/documents/artifacts/gengemz-prod/users/BgadTI8Gv0BPHcWNheqavuRt3uKc/data/board -H 'Authorization: Bearer owner'
+HTTP/1.1 200 OK
+content-type: application/json
+content-length: 2564
+
+{
+  "name": "projects/gengemztest-9582e/databases/(default)/documents/artifacts/gengemz-prod/users/BgadTI8Gv0BPHcWNheqavuRt3uKc/data/board",
+  "fields": {
+    "columns": {
+      "mapValue": {
+        "fields": {
+          "backlog": {
+            "mapValue": {
+              "fields": {
+                "id": {
+                  "stringValue": "backlog"
+                },
+                "title": {
+                  "stringValue": "To Play"
+                },
+                "icon": {
+                  "stringValue": "clock"
+                }
+              }
+            }
+          },
+          "playing": {
+            "mapValue": {
+              "fields": {
+                "id": {
+                  "stringValue": "playing"
+                },
+                "title": {
+                  "stringValue": "Currently Playing"
+                },
+                "icon": {
+                  "stringValue": "gamepad"
+                },
+                "isPlaying": {
+                  "booleanValue": true
+                }
+              }
+            }
+          },
+          "completed": {
+            "mapValue": {
+              "fields": {
+                "id": {
+                  "stringValue": "completed"
+                },
+                "title": {
+                  "stringValue": "Victory Road"
+                },
+                "icon": {
+                  "stringValue": "trophy"
+                },
+                "isCompletion": {
+                  "booleanValue": true
+                }
+              }
+            }
+          },
+          "col-322ef154-fa27-46ae-a349-0be394443491": {
+            "mapValue": {
+              "fields": {
+                "id": {
+                  "stringValue": "col-322ef154-fa27-46ae-a349-0be394443491"
+                },
+                "title": {
+                  "stringValue": "Jugando en co-op"
+                },
+                "icon": {
+                  "stringValue": "gamepad"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "columnOrder": {
+      "arrayValue": {
+        "values": [{
+          "stringValue": "backlog"
+        }, {
+          "stringValue": "playing"
+        }, {
+          "stringValue": "completed"
+        }, {
+          "stringValue": "col-322ef154-fa27-46ae-a349-0be394443491"
+        }]
+      }
+    },
+    "schemaVersion": {
+      "integerValue": "2"
+    },
+    "updatedAt": {
+      "timestampValue": "2026-09-07T18:25:03.546Z"
+    }
+  },
+  "createTime": "2026-09-07T18:25:03.575062Z",
+  "updateTime": "2026-09-07T18:25:03.575062Z"
+}
