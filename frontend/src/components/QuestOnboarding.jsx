@@ -70,6 +70,7 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData, onOpenCreat
         {stepIndex === 0 ? (
           <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
             <QuestGameSearchStep
+              key={stepIndex}
               title={currentQuest.title}
               description={'The "Currently Playing" column is what you\'re playing right now — track a game there so you (and friends who follow you) can see it at a glance.'}
               targetColumnId={playingColumnId(boardData) || boardData?.columnOrder?.[0]}
@@ -80,6 +81,7 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData, onOpenCreat
         ) : stepIndex === 1 ? (
           <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
             <QuestGameSearchStep
+              key={stepIndex}
               title={currentQuest.title}
               description={'"Victory Road" is where finished games go — drop one there to mark it complete and add it to your progression.'}
               targetColumnId={completionColumnId(boardData) || boardData?.columnOrder?.[0]}
@@ -90,6 +92,7 @@ const QuestOnboardingSteps = ({ onComplete, boardActions, boardData, onOpenCreat
         ) : stepIndex === 2 ? (
           <div className="bg-[var(--panel-muted)] border border-[var(--border)] rounded-xl p-6">
             <QuestGameSearchStep
+              key={stepIndex}
               title={currentQuest.title}
               description={'"To Play" is your backlog — save a game there to keep track of what\'s next.'}
               targetColumnId={boardData?.columnOrder?.[0]}
