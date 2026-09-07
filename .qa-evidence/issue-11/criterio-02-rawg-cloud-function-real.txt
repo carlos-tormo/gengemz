@@ -1,0 +1,30 @@
+[90m├────────────────[39m[90m┼────────────────[39m[90m┼──────────────────────────────────┤[39m
+[90m│[39m Functions      [90m│[39m 127.0.0.1:5001 [90m│[39m http://127.0.0.1:4000/functions  [90m│[39m
+[90m├────────────────[39m[90m┼────────────────[39m[90m┼──────────────────────────────────┤[39m
+[90m│[39m Firestore      [90m│[39m 127.0.0.1:8080 [90m│[39m http://127.0.0.1:4000/firestore  [90m│[39m
+[90m├────────────────[39m[90m┼────────────────[39m[90m┼──────────────────────────────────┤[39m
+[90m│[39m Hosting        [90m│[39m 127.0.0.1:5002 [90m│[39m n/a                              [90m│[39m
+[90m├────────────────[39m[90m┼────────────────[39m[90m┼──────────────────────────────────┤[39m
+[90m│[39m Extensions     [90m│[39m 127.0.0.1:5001 [90m│[39m http://127.0.0.1:4000/extensions [90m│[39m
+[90m└────────────────[39m[90m┴────────────────[39m[90m┴──────────────────────────────────┘[39m
+  Emulator Hub host: 127.0.0.1 port: 4400
+  Other reserved ports: 4500, 9150
+[90m┌─────────────────────────[39m[90m┬───────────────[39m[90m┬─────────────────────┐[39m
+[90m│[39m[33m Extension Instance Name [39m[90m│[39m[33m Extension Ref [39m[90m│[39m[33m View in Emulator UI [39m[90m│[39m
+[90m└─────────────────────────[39m[90m┴───────────────[39m[90m┴─────────────────────┘[39m
+Issues? Report them at https://github.com/firebase/firebase-tools/issues and attach the *-debug.log files.
+ 
+i  functions: Beginning execution of "us-central1-searchGames"
+i  functions: Finished "us-central1-searchGames" in 5.643959ms
+i  functions: Beginning execution of "us-central1-searchGames"
+⚠  External network resource requested!
+   - URL: "https://api.rawg.io/api/games?search=hollow+knight&page_size=10&key=REDACTED"
+ - Be careful, this may be a production service.
+>  Error fetching games: Error: RAWG request failed with 401
+>      at /Users/carlos.tormo/ggz/gengemz/functions/index.js:239:17
+>      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+>      at async /Users/carlos.tormo/ggz/gengemz/functions/node_modules/firebase-functions/lib/common/providers/https.js:566:4
+>      at async runFunction (/opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorRuntime.js:400:9)
+>      at async runHTTPS (/opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorRuntime.js:425:5)
+>      at async /opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorRuntime.js:592:21
+i  functions: Finished "us-central1-searchGames" in 1044.709417ms
